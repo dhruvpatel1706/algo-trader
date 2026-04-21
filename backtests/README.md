@@ -17,7 +17,7 @@ After each backtest you'll find a directory `backtests/<strategy_name>/<UTC-time
 To run a backtest:
 
 ```bash
-uv run python -m src.backtest.run --strategy mr_etf --start 2018-01-02 --end 2025-04-18
+uv run python -m src.backtest.cli --strategy mr_etf --start 2018-01-02 --end 2025-04-18
 ```
 
 ## `mr_etf` — Bollinger + RSI(2) mean reversion, ADX-gated

@@ -86,7 +86,7 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 "src/execution/broker.py" = ["PLC0415"]
 "src/data/loader.py" = ["PLC0415"]
 # CLI script: hardcoded `git` invocation is safe (no user input).
-"src/backtest/run.py" = ["S603", "S607"]
+"src/backtest/cli.py" = ["S603", "S607"]
 # FastAPI uses Query()/Depends() in arg defaults idiomatically.
 "dashboard/api/main.py" = ["B008"]
 # Singletons + lazy alpaca imports inside dashboard helpers are intentional.
@@ -114,7 +114,7 @@ omit = [
   "src/agents/*",
   "src/data/*",
   "src/__init__.py",
-  "src/backtest/run.py",       # CLI script; tested via integration in CI
+  "src/backtest/cli.py",       # CLI script; tested via integration in CI
   "src/strategies/__init__.py", # registry
 ]
 

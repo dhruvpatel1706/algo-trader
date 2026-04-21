@@ -34,7 +34,7 @@ Open `http://localhost:3000` for the dashboard. Kill switch is the red button (t
 1. Create `src/strategies/<name>.py`, subclass `Strategy`, add a `<Name>Params` dataclass.
 2. Each parameter gets a comment naming its **economic rationale**, **typical range**, **how it can break**.
 3. Add tests in `tests/unit/strategies/test_<name>.py`.
-4. Backtest: `uv run python -m src.backtest.run --strategy <name> --start YYYY-MM-DD --end YYYY-MM-DD`.
+4. Backtest: `uv run python -m src.backtest.cli --strategy <name> --start YYYY-MM-DD --end YYYY-MM-DD`.
 5. Update `backtests/README.md` with honest expected metrics + failure modes.
 6. Add `<name>` to `dashboard/api/state.py:_strategies` so it appears on the dashboard.
 

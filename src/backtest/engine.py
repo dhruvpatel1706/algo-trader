@@ -9,6 +9,8 @@ import pandas as pd
 
 from src.backtest.costs import DEFAULT_COSTS, CostModel
 from src.backtest.metrics import TradeRecord
+from src.config import get_settings
+from src.risk.sizing import position_size
 from src.signals.indicators import atr as compute_atr
 from src.strategies.base import Signal, Strategy
 
@@ -135,14 +137,19 @@ class BacktestEngine:
         if not (low - 0.005 * float(bar["open"]) <= fill_price <= h + 0.005 * float(bar["open"])):
             self._warnings.append(f"implausible fill {sig.symbol}@{fill_ts}: {fill_price:.2f}")
 
-        # 1% risk to stop. Engine sizing matches the live position_size formula.
-        risk_per_share = abs(fill_price - float(sig.stop))
-        if risk_per_share <= 0:
-            return
+        # Sizing: defer to the live risk module so backtest math == live math byte-for-byte.
+        s = get_settings()
         equity_now = self._mark_to_market(signal_ts, bars)
-        risk_dollar = equity_now * 0.01
-        cap_qty = int((equity_now * 0.10) / fill_price) if fill_price > 0 else 0
-        qty = min(int(risk_dollar / risk_per_share), cap_qty)
+        try:
+            qty = position_size(
+                equity=Decimal(str(equity_now)),
+                risk_pct=s.MAX_PER_TRADE_RISK,
+                entry=Decimal(str(fill_price)),
+                stop=Decimal(str(sig.stop)),
+                max_position_pct=s.MAX_SINGLE_POSITION,
+            )
+        except (ValueError, ArithmeticError):
+            return
         if qty <= 0:
             return
 

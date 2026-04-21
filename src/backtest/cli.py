@@ -1,4 +1,4 @@
-"""Backtest CLI: `uv run python -m src.backtest.run --strategy <name> --start ... --end ...`.
+"""Backtest CLI: `uv run python -m src.backtest.cli --strategy <name> --start ... --end ...`.
 
 Outputs `backtests/<strategy>/<UTC-timestamp>/` with metrics.json, equity.png, trades.parquet.
 """
