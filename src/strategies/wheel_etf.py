@@ -72,7 +72,9 @@ class WheelEtf(Strategy):
     """CSP wheel on SPY/QQQ. v1 emits no signals — see module docstring."""
 
     name = "wheel_etf"
-    params = WheelParams()
+
+    def __init__(self, params: WheelParams | None = None) -> None:
+        self.params: WheelParams = params if params is not None else WheelParams()
 
     def universe(self) -> tuple[str, ...]:
         return ("SPY", "QQQ")

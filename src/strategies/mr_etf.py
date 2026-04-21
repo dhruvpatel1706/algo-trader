@@ -67,7 +67,9 @@ class MrEtf(Strategy):
     """Bollinger(20,2) + RSI(2)<10 mean-reversion on SPY/QQQ, gated by ADX(14)<20."""
 
     name = "mr_etf"
-    params = MrParams()
+
+    def __init__(self, params: MrParams | None = None) -> None:
+        self.params: MrParams = params if params is not None else MrParams()
 
     def universe(self) -> tuple[str, ...]:
         return ("SPY", "QQQ")

@@ -63,18 +63,20 @@ live/locks/
 journal/*.jsonl
 !journal/.gitkeep
 
-# Backtest run artifacts (everything except the README)
+# Backtest run artifacts (everything except the README and named sweeps)
 backtests/*/
 !backtests/README.md
+!backtests/mr_etf_sweep/
 
-# Backtest artifacts (large)
+# Backtest artifacts (large) — but keep sweep result tables under mr_etf_sweep
 backtests/**/*.parquet
+!backtests/mr_etf_sweep/**/*.parquet
 backtests/**/*.png
 backtests/**/*.csv
 
 # Data caches
 data/cache/
-*.parquet
+data/cache/**/*.parquet
 
 # OS / editor
 .DS_Store

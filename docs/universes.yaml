@@ -1,0 +1,89 @@
+# Universe definitions for backtests + sweeps.
+#
+# These are CURATED lists. They are not survivorship-bias-free:
+#   - The "liquid ETFs" list reflects names that have been consistently top-AUM
+#     for years; survivorship is mild but real (failed niche ETFs are absent).
+#   - The "large_caps_50" list is roughly the S&P 500 top market caps as of
+#     early 2022. Some of these dropped out of the top 50 by late 2024; some
+#     names that climbed in (like LLY) are included. For paper-grade results,
+#     swap to point-in-time index constituents.
+#
+# Update this file rather than hard-coding lists in scripts.
+
+spy_qqq:
+  - SPY
+  - QQQ
+
+liquid_etfs_top20:
+  - SPY     # S&P 500
+  - QQQ     # Nasdaq 100
+  - IWM     # Russell 2000
+  - IVV     # S&P 500 (iShares)
+  - VOO     # S&P 500 (Vanguard)
+  - VTI     # Total US market
+  - EFA     # MSCI EAFE
+  - EEM     # MSCI emerging markets
+  - AGG     # Aggregate bond
+  - BND     # Total bond
+  - GLD     # Gold
+  - SLV     # Silver
+  - XLF     # Financials sector
+  - XLK     # Technology sector
+  - XLE     # Energy sector
+  - XLV     # Healthcare sector
+  - XLY     # Consumer discretionary sector
+  - XLP     # Consumer staples sector
+  - TLT     # 20+ year Treasury
+  - HYG     # High-yield corporate bond
+
+large_caps_50:
+  - AAPL
+  - MSFT
+  - AMZN
+  - GOOGL
+  - GOOG
+  - META
+  - TSLA
+  - NVDA
+  - BRK-B
+  - JPM
+  - JNJ
+  - V
+  - PG
+  - UNH
+  - HD
+  - XOM
+  - MA
+  - CVX
+  - BAC
+  - ABBV
+  - PFE
+  - AVGO
+  - COST
+  - MRK
+  - KO
+  - PEP
+  - LLY
+  - TMO
+  - ABT
+  - WMT
+  - CRM
+  - MCD
+  - DIS
+  - CSCO
+  - ADBE
+  - ACN
+  - NEE
+  - NFLX
+  - NKE
+  - WFC
+  - DHR
+  - INTC
+  - VZ
+  - COP
+  - AMD
+  - BMY
+  - CMCSA
+  - T
+  - IBM
+  - RTX
