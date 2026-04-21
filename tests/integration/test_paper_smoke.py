@@ -66,6 +66,7 @@ def test_place_order_dry_run_round_trips_through_both_gates(tmp_path, monkeypatc
     env["ALPACA_API_KEY"] = "test_key"
     env["ALPACA_SECRET_KEY"] = "test_secret"
     env["LIVE_TRADING"] = "0"
+    env["PYTHONPATH"] = str(fake_repo)
     # Override REPO detection by running with cwd=fake_repo and symlinking scripts/src.
     (fake_repo / "scripts").symlink_to(REPO / "scripts")
     (fake_repo / "src").symlink_to(REPO / "src")
