@@ -27,6 +27,17 @@ REPO = Path(__file__).resolve().parent.parent
 JOURNAL = REPO / "journal"
 
 
+def _publish(channel: str, payload: dict) -> None:
+    """Fire-and-forget Redis publish. Never raises — the dashboard is best-effort."""
+    try:
+        import redis
+
+        client = redis.Redis.from_url(get_settings().REDIS_URL, socket_connect_timeout=1)
+        client.publish(channel, json.dumps(payload, default=str))
+    except Exception:
+        pass
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Place a paper order via Alpaca.")
     p.add_argument(
@@ -118,39 +129,39 @@ def main() -> int:
 
     writer = JournalWriter(JOURNAL)
     if args.dry_run:
-        writer.write(
-            {
-                "event": "submit_dry_run",
-                "cycle_id": cycle_id,
-                "client_order_id": coid,
-                "symbol": order.symbol,
-                "qty": order.qty,
-                "side": order.side,
-                "order_type": order.order_type,
-                "limit_price": str(order.limit_price) if order.limit_price else None,
-                "approvals": {"risk": True, "compliance": True},
-            }
-        )
-        print(json.dumps({"event": "submit_dry_run", "client_order_id": coid, "ok": True}))
-        return 0
-
-    broker = PaperBroker()
-    submission = broker.submit(order, token)
-    writer.write(
-        {
-            "event": "submit",
+        record = {
+            "event": "submit_dry_run",
             "cycle_id": cycle_id,
-            "client_order_id": submission.client_order_id,
-            "broker_order_id": submission.broker_order_id,
+            "client_order_id": coid,
             "symbol": order.symbol,
             "qty": order.qty,
             "side": order.side,
             "order_type": order.order_type,
             "limit_price": str(order.limit_price) if order.limit_price else None,
-            "status": submission.status,
             "approvals": {"risk": True, "compliance": True},
         }
-    )
+        writer.write(record)
+        _publish("order.submit_dry_run", record)
+        print(json.dumps({"event": "submit_dry_run", "client_order_id": coid, "ok": True}))
+        return 0
+
+    broker = PaperBroker()
+    submission = broker.submit(order, token)
+    record = {
+        "event": "submit",
+        "cycle_id": cycle_id,
+        "client_order_id": submission.client_order_id,
+        "broker_order_id": submission.broker_order_id,
+        "symbol": order.symbol,
+        "qty": order.qty,
+        "side": order.side,
+        "order_type": order.order_type,
+        "limit_price": str(order.limit_price) if order.limit_price else None,
+        "status": submission.status,
+        "approvals": {"risk": True, "compliance": True},
+    }
+    writer.write(record)
+    _publish("order.submit", record)
     print(json.dumps({"event": "submit", "client_order_id": coid, "status": submission.status}))
     return 0
 

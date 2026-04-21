@@ -81,7 +81,7 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "PLR2004", "S311", "PLR0915"]
-"scripts/**" = ["T201"]
+"scripts/**" = ["T201", "S603", "S607", "PLC0415", "S110"]
 # Lazy imports here are intentional defensive fallbacks (alpaca/yfinance optional at import time).
 "src/execution/broker.py" = ["PLC0415"]
 "src/data/loader.py" = ["PLC0415"]
@@ -94,6 +94,8 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 "dashboard/api/state.py" = ["PLW0603"]
 # Test fixtures sometimes need import-after-monkeypatch ordering.
 "tests/unit/test_dashboard_api.py" = ["PLC0415"]
+# Integration tests legitimately shell out via subprocess.
+"tests/integration/**" = ["S603", "S607", "PLW1510"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

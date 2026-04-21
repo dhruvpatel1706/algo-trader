@@ -59,6 +59,14 @@ live/state/
 live/incidents/
 live/locks/
 
+# Journal contents — directory is committed for structure; daily files are not.
+journal/*.jsonl
+!journal/.gitkeep
+
+# Backtest run artifacts (everything except the README)
+backtests/*/
+!backtests/README.md
+
 # Backtest artifacts (large)
 backtests/**/*.parquet
 backtests/**/*.png
