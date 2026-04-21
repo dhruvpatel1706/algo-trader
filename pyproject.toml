@@ -23,6 +23,7 @@ dependencies = [
   "yfinance>=0.2.49",
   # Backtest
   "vectorbt>=0.26",
+  "matplotlib>=3.9",
   # Infra
   "redis>=5.2",
   "httpx>=0.27",
@@ -84,6 +85,8 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 # Lazy imports here are intentional defensive fallbacks (alpaca/yfinance optional at import time).
 "src/execution/broker.py" = ["PLC0415"]
 "src/data/loader.py" = ["PLC0415"]
+# CLI script: hardcoded `git` invocation is safe (no user input).
+"src/backtest/run.py" = ["S603", "S607"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -97,7 +100,13 @@ markers = [
 [tool.coverage.run]
 source = ["src"]
 branch = true
-omit = ["src/agents/*", "src/data/*", "src/__init__.py"]
+omit = [
+  "src/agents/*",
+  "src/data/*",
+  "src/__init__.py",
+  "src/backtest/run.py",       # CLI script; tested via integration in CI
+  "src/strategies/__init__.py", # registry
+]
 
 [tool.coverage.report]
 fail_under = 90

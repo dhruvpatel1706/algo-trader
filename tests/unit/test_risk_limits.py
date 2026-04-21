@@ -73,8 +73,8 @@ def test_portfolio_heat_cap_enforced():
         def __init__(self, r):
             self.open_risk = Decimal(r)
 
-    # Existing 5.5% heat. New trade adds 1% (1000 shares × $1 stop). Total 6.5% > 6% cap.
-    # Use entry $10, stop $9 so the qty isn't position-capped (which would suppress added risk).
+    # Existing 5.5% heat. New trade adds 1% (1000 shares x $1 stop). Total 6.5% > 6% cap.
+    # Use entry $10, stop $9 so qty isn't position-capped (which would suppress added risk).
     snap = _snap(positions=(P("5500"),))
     d = check_limits(_trade(entry=Decimal("10"), stop=Decimal("9")), snap)
     assert not d.approve
