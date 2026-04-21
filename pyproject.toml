@@ -74,11 +74,16 @@ src = ["src", "tests", "scripts", "dashboard/api"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "PL", "RUF", "S", "ASYNC"]
-ignore = ["S101", "PLR0913", "PLR2004", "S311"]
+# S104: binding to 0.0.0.0 is intentional for the dev dashboard; document in OPERATIONS.md.
+# PLR0911: risk/limits uses a guard pattern with one return per check; that is the design.
+ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "PLR2004", "S311", "PLR0915"]
 "scripts/**" = ["T201"]
+# Lazy imports here are intentional defensive fallbacks (alpaca/yfinance optional at import time).
+"src/execution/broker.py" = ["PLC0415"]
+"src/data/loader.py" = ["PLC0415"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
