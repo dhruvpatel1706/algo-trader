@@ -86,7 +86,10 @@ def _fetch_alpaca(symbol: str, start: date, end: date) -> pd.DataFrame | None:
 def _fetch_yfinance(symbol: str, start: date, end: date) -> pd.DataFrame | None:
     import yfinance as yf
 
-    df = yf.download(symbol, start=start, end=end, progress=False, auto_adjust=False)
+    # auto_adjust=True applies the split/dividend adjustment factor backward through history,
+    # so a historical close pre-split is divided by the split ratio. Without this, a 10:1
+    # split prints as a ~-90% gap that triggers ATR-based stops on every affected day.
+    df = yf.download(symbol, start=start, end=end, progress=False, auto_adjust=True)
     if df is None or df.empty:
         return None
     if isinstance(df.columns, pd.MultiIndex):

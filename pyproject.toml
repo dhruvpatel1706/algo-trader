@@ -95,6 +95,7 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 # Test fixtures sometimes need import-after-monkeypatch ordering.
 "tests/unit/test_dashboard_api.py" = ["PLC0415"]
 "tests/unit/test_observability.py" = ["PLC0415"]
+"tests/unit/data/test_loader.py" = ["PLC0415"]
 # Integration tests legitimately shell out via subprocess.
 "tests/integration/**" = ["S603", "S607", "PLW1510"]
 
@@ -105,6 +106,7 @@ addopts = "-ra --strict-markers --strict-config"
 markers = [
   "integration: integration tests (deselect with '-m \"not integration\"')",
   "broker: requires paper broker connection",
+  "network: hits the network (yfinance, etc.)",
 ]
 
 [tool.coverage.run]
