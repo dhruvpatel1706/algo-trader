@@ -6,6 +6,7 @@ Outputs `backtests/<strategy>/<UTC-timestamp>/` with metrics.json, equity.png, t
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import subprocess
 import sys
@@ -73,7 +74,9 @@ def main() -> int:
 
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, default=str))
     if result.trades:
-        pd.DataFrame([t.__dict__ for t in result.trades]).to_parquet(out_dir / "trades.parquet")
+        pd.DataFrame([dataclasses.asdict(t) for t in result.trades]).to_parquet(
+            out_dir / "trades.parquet"
+        )
 
     eq = result.equity
     peak = eq.cummax()
