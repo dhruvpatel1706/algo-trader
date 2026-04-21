@@ -94,6 +94,7 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 "dashboard/api/state.py" = ["PLW0603"]
 # Test fixtures sometimes need import-after-monkeypatch ordering.
 "tests/unit/test_dashboard_api.py" = ["PLC0415"]
+"tests/unit/test_observability.py" = ["PLC0415"]
 # Integration tests legitimately shell out via subprocess.
 "tests/integration/**" = ["S603", "S607", "PLW1510"]
 

@@ -25,9 +25,12 @@ import logging
 from datetime import date
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
+from src.observability.logging import configure_logging
+from src.observability.metrics import COST_USD_TOTAL, KILL_INVOCATIONS, PORTFOLIO_EQUITY, REGISTRY
 
 from dashboard.api import ws as ws_module
 from dashboard.api.broker_proxy import BrokerProxy, get_broker_proxy
@@ -37,6 +40,7 @@ from dashboard.api.kill import execute_kill, list_incidents
 from dashboard.api.state import DashboardState, get_state
 
 log = logging.getLogger(__name__)
+configure_logging()
 
 app = FastAPI(title="algo-trader dashboard", version="0.1.0")
 
@@ -55,6 +59,13 @@ class KillRequest(BaseModel):
     reason: str = Field(default="manual kill from dashboard", max_length=200)
 
 
+class CostBump(BaseModel):
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    requests: int = Field(default=0, ge=0)
+    usd: float = Field(default=0.0, ge=0)
+
+
 _StateDep = Annotated[DashboardState, Depends(get_state)]
 _BrokerDep = Annotated[BrokerProxy, Depends(get_broker_proxy)]
 
@@ -69,6 +80,7 @@ def portfolio(broker: _BrokerDep) -> dict:
     acc = broker.get_account()
     if acc is None:
         return {"connected": False, "reason": "alpaca credentials not configured"}
+    PORTFOLIO_EQUITY.set(float(acc.get("equity", 0.0)))
     return {"connected": True, **acc}
 
 
@@ -131,6 +143,19 @@ def metrics() -> dict:
 
 @app.get("/api/costs")
 def costs(state: _StateDep) -> dict:
+    c = state.costs()
+    COST_USD_TOTAL.set(c["estimated_usd"])
+    return c
+
+
+@app.post("/api/costs/add")
+def costs_add(bump: CostBump, state: _StateDep) -> dict:
+    state.add_cost(
+        input_tokens=bump.input_tokens,
+        output_tokens=bump.output_tokens,
+        requests=bump.requests,
+        usd=bump.usd,
+    )
     return state.costs()
 
 
@@ -148,8 +173,15 @@ def incidents(limit: int = Query(50, ge=1, le=500)) -> list[dict]:
 def kill(req: KillRequest, broker: _BrokerDep, state: _StateDep) -> dict:
     if req.confirm != "FLATTEN":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'kill requires {"confirm":"FLATTEN"}')
+    KILL_INVOCATIONS.inc()
     incident = execute_kill(broker, state, reason=req.reason, requested_by="dashboard")
     return {"ok": True, **incident}
+
+
+@app.get("/metrics")
+def prometheus_metrics() -> Response:
+    """Prometheus scrape endpoint."""
+    return Response(content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.websocket("/ws/stream")
