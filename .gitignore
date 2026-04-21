@@ -68,11 +68,13 @@ backtests/*/
 !backtests/README.md
 !backtests/mr_etf_sweep/
 
-# Backtest artifacts (large) — but keep sweep result tables under mr_etf_sweep
+# Backtest artifacts (large) — but keep tables/csv/png under mr_etf_sweep
 backtests/**/*.parquet
-!backtests/mr_etf_sweep/**/*.parquet
 backtests/**/*.png
 backtests/**/*.csv
+!backtests/mr_etf_sweep/**/*.parquet
+!backtests/mr_etf_sweep/**/*.png
+!backtests/mr_etf_sweep/**/*.csv
 
 # Data caches
 data/cache/
