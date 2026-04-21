@@ -50,7 +50,7 @@ def _grid(**params: list) -> Iterable[dict[str, Any]]:
 
 
 _EMPTY_METRICS: dict[str, Any] = {
-    "sharpe": 0.0,
+    "sharpe": 0.0,  # joined-equity (Option B)
     "sortino": 0.0,
     "calmar": 0.0,
     "max_dd": 0.0,
@@ -61,6 +61,9 @@ _EMPTY_METRICS: dict[str, Any] = {
     "start_equity": 0.0,
     "end_equity": 0.0,
     "total_return": 0.0,
+    "per_window_sharpe_mean": 0.0,  # stability check (Option A mean)
+    "per_window_sharpe_std": 0.0,
+    "n_windows": 0,
 }
 
 
@@ -139,6 +142,9 @@ def run_sweep(
                         strat, bars, train_bars=train_bars, test_bars=test_bars
                     )
                     metrics = summarize(result.equity, result.returns, result.trades)
+                    metrics["per_window_sharpe_mean"] = round(result.per_window_sharpe_mean, 3)
+                    metrics["per_window_sharpe_std"] = round(result.per_window_sharpe_std, 3)
+                    metrics["n_windows"] = result.n_windows
                     cells.append(
                         SweepCell(
                             config={"universe": uname, "timeframe": tf, **params},

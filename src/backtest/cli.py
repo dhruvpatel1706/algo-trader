@@ -61,6 +61,10 @@ def main() -> int:
 
     result = run_walk_forward(strat, bars, train_bars=args.train_bars, test_bars=args.test_bars)
     metrics = summarize(result.equity, result.returns, result.trades)
+    # Joined-equity is canonical (Option B). Per-window stats are the stability check.
+    metrics["per_window_sharpe_mean"] = round(result.per_window_sharpe_mean, 3)
+    metrics["per_window_sharpe_std"] = round(result.per_window_sharpe_std, 3)
+    metrics["n_windows"] = result.n_windows
     metrics["strategy"] = strat.name
     metrics["version"] = _git_sha()
     metrics["period"] = [args.start, args.end]

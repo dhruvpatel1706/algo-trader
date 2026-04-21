@@ -92,9 +92,7 @@ def _summarize_markdown(df, out_dir: Path, eligible) -> str:
     if eligible.empty:
         lines.append("**None.** No configuration crossed all three thresholds.")
         lines.append("")
-        lines.append(
-            "Which threshold bound matters — see the full table for closest misses."
-        )
+        lines.append("Which threshold bound matters — see the full table for closest misses.")
     else:
         lines.append(
             _markdown_table(
@@ -106,10 +104,19 @@ def _summarize_markdown(df, out_dir: Path, eligible) -> str:
                     "rsi_oversold",
                     "n_trades",
                     "sharpe",
+                    "per_window_sharpe_mean",
+                    "per_window_sharpe_std",
                     "max_dd",
                     "profit_factor",
                 ],
             )
+        )
+        lines.append("")
+        lines.append(
+            "_`sharpe` is computed on the joined / compounded equity (Option B). "
+            "`per_window_sharpe_mean` and `_std` are stability stats from the "
+            "Option A per-window standalone Sharpes. Big std => the edge is "
+            "regime-dependent._"
         )
     lines.append("")
     lines.append("## Skipped cells (by reason)")
@@ -138,6 +145,9 @@ def _summarize_markdown(df, out_dir: Path, eligible) -> str:
                 "rsi_oversold",
                 "n_trades",
                 "sharpe",
+                "per_window_sharpe_mean",
+                "per_window_sharpe_std",
+                "n_windows",
                 "max_dd",
                 "profit_factor",
                 "skipped",

@@ -32,6 +32,11 @@ class BacktestResult:
     returns: pd.Series
     trades: list[TradeRecord]
     warnings: list[str] = field(default_factory=list)
+    # Per-window stability metrics (only populated by walk-forward; 0/0 from a
+    # single-engine run since there's only one window).
+    per_window_sharpe_mean: float = 0.0
+    per_window_sharpe_std: float = 0.0
+    n_windows: int = 1
 
 
 class BacktestEngine:
