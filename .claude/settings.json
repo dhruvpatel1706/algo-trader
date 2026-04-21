@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "disableBypassPermissionsMode": "disable",
+    "allow": [
+      "Edit(src/**)",
+      "Edit(dashboard/**)",
+      "Edit(tests/**)",
+      "Edit(docs/**)",
+      "Edit(.claude/**)",
+      "Edit(scripts/**)",
+      "Read(**/*.py)",
+      "Read(**/*.ts)",
+      "Read(**/*.tsx)",
+      "Read(**/*.md)",
+      "Read(**/*.json)",
+      "Read(**/*.yaml)",
+      "Read(**/*.yml)",
+      "Read(**/*.toml)",
+      "Bash(uv run *)",
+      "Bash(uv add *)",
+      "Bash(uv sync *)",
+      "Bash(uv sync)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(pnpm *)",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "mcp__alpaca__*"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(docker *)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Edit(live/**)",
+      "Edit(.env)",
+      "Edit(.env.*)",
+      "Bash(rm -rf *)",
+      "Bash(sudo:*)",
+      "Bash(curl * | sh *)",
+      "Bash(wget * | sh *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/guard_live_order.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Was every order this session preceded by APPROVE from both risk-manager and compliance-checker, and was a JSONL record written to journal/? If not, respond with {\"ok\":false,\"reason\":\"...\"}. Otherwise {\"ok\":true}."
+          }
+        ]
+      }
+    ]
+  },
+  "autoMemoryEnabled": true,
+  "cleanupPeriodDays": 30
+}

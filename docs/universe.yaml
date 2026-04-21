@@ -1,0 +1,10 @@
+# Universe definition for the pre-market cycle.
+# Keep this small in v1 — three liquid index ETFs only.
+equities:
+  - SPY
+  - QQQ
+  - IWM
+
+options_underlyings:
+  - SPY
+  - QQQ
