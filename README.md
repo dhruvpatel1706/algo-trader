@@ -40,6 +40,9 @@ Most retail algo projects I've looked at either (a) lie about their drawdowns, (
 ## Quick start
 
 ```bash
+# 0. Clone
+git clone https://github.com/dhruvpatel1706/algo-trader.git && cd algo-trader
+
 # 1. Install Python deps (uv manages the venv)
 uv sync --extra dev
 
