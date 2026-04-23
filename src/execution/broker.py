@@ -125,6 +125,6 @@ class LiveBroker:
     def submit(self, *args, **kwargs) -> NoReturn:
         raise NotImplementedError(
             "live trading is disabled in v1; see docs/policy.md "
-            "(re-enabling requires coordinated changes to docs/policy.md, "
-            "src/execution/broker.py, and .claude/hooks/guard_live_order.sh)"
+            "(re-enabling requires coordinated changes to docs/policy.md "
+            "and src/execution/broker.py)"
         )

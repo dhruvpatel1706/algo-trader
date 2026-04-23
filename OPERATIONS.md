@@ -21,10 +21,11 @@ uv run uvicorn dashboard.api.main:app --reload --port 8000
 # 5. Frontend (port 3000)
 cd dashboard/web && pnpm install && pnpm dev
 
-# 6. Drive the system from Claude Code
-claude   # then:
-> Run the broker-integration skill to smoke-test Alpaca paper.
-> Run the pre-market cycle on docs/universe.yaml.
+# 6. Smoke test the paper pipeline (dry-run, no broker call)
+uv run python scripts/smoke_paper.py
+
+# 7. Run a backtest
+uv run python -m src.backtest.cli --strategy mr_etf --start 2022-01-01 --end 2024-12-31
 ```
 
 Open `http://localhost:3000` for the dashboard. Kill switch is the red button (top right). Confirms by typing `FLATTEN`.
@@ -72,10 +73,9 @@ uv run python scripts/smoke_paper.py --live # real Alpaca paper submit
 
 ## Enable live trading
 
-**Three coordinated changes in one reviewed PR — there is no shortcut.**
+**Two coordinated changes in one reviewed PR — there is no shortcut.**
 
 1. Edit `docs/policy.md` to remove the paper-only restriction and document the policy basis.
 2. Replace `LiveBroker` `NotImplementedError` in `src/execution/broker.py` with a real implementation.
-3. Edit `.claude/hooks/guard_live_order.sh` to permit `LIVE_TRADING=1`.
 
 Re-run `pytest`, re-run the smoke. Then and only then can `--paper` come off the executor command.

@@ -1,16 +1,15 @@
 # Compliance policy (operator-specific, v1)
 
-This file is the source of truth for what the system is allowed to do. The `compliance-checker` subagent reads and enforces every rule here. **Do not relax any rule without a human-authored PR.** The orchestrator MUST NOT propose relaxing any rule below unless explicitly asked by a human.
+This file is the source of truth for what the system is allowed to do. The compliance checks in `src/risk/` and `src/execution/` enforce every rule here. **Do not relax any rule without a human-authored PR.**
 
 ## 1. Paper-only
 
 The operator is on a US work visa that restricts self-employment, and the IRS treats frequent trading as a business activity. Therefore v1 of this system is **paper-only**.
 
-Re-enabling live trading is gated by three coordinated changes that must land in one reviewed PR:
+Re-enabling live trading is gated by two coordinated changes that must land in one reviewed PR:
 
 1. A human-authored change to **this file** (removing the paper-only restriction and naming the policy basis for live).
 2. A code change in `src/execution/broker.py` that replaces the `LiveBroker` `NotImplementedError` stub with a real implementation.
-3. Editing `.claude/hooks/guard_live_order.sh` to permit `LIVE_TRADING=1`.
 
 ## 2. Account ownership
 

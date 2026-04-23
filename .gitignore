@@ -51,8 +51,11 @@ next-env.d.ts
 *.key
 *.p12
 
-# Operator-private orchestration overrides
+# Claude Code tooling (not shipped with this repo)
+.claude/
+CLAUDE.md
 CLAUDE.local.md
+AGENTS.md
 
 # Live runtime state
 live/state/

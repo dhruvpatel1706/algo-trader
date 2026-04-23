@@ -1,8 +1,8 @@
 # algo-trader
 
-Paper-first algorithmic trading system (v1). Built around a Claude Code orchestrator with specialized subagents.
+Paper-first algorithmic trading system (v1).
 
-> **v1 is paper-only by policy.** The system trades only in accounts owned by the operator. No third-party / nominee / shared accounts. Re-enabling live trading requires a coordinated change to `docs/policy.md`, `src/execution/broker.py`, and the `guard_live_order.sh` hook — all in one reviewed PR. See `docs/policy.md`.
+> **v1 is paper-only by policy.** The system trades only in accounts owned by the operator. No third-party / nominee / shared accounts. Re-enabling live trading requires a coordinated change to `docs/policy.md` and `src/execution/broker.py` — both in one reviewed PR. See `docs/policy.md`.
 
 ## Quick start
 
@@ -21,10 +21,11 @@ cp .env.example .env
 uv run uvicorn dashboard.api.main:app --reload &
 cd dashboard/web && pnpm install && pnpm dev
 
-# 5. Drive it from Claude Code
-claude
-# > Run the broker-integration skill to smoke-test Alpaca paper.
-# > Run the pre-market cycle on docs/universe.yaml.
+# 5. Smoke-test the paper pipeline
+uv run python scripts/smoke_paper.py
+
+# 6. Run a backtest
+uv run python -m src.backtest.cli --strategy mr_etf --start 2022-01-01 --end 2024-12-31
 ```
 
 ## Repository layout
@@ -38,8 +39,7 @@ claude
 | `live/` | Protected runtime state. Edits require plan mode. |
 | `tests/` | pytest suite (≥90% on `src/risk/` and `src/execution/`) |
 | `docs/` | `policy.md` (compliance), `research.md` (volatile refs), `universe.yaml` |
-| `scripts/` | `place_order.py` is the only path to the broker, guarded by a PreToolUse hook |
-| `.claude/` | Orchestrator subagents, skills, hooks, settings |
+| `scripts/` | `place_order.py` is the only path to the broker |
 | `OPERATIONS.md` | Runbook (added in Phase 9) |
 
 ## Hard safety rules (immutable in v1)
