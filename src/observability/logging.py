@@ -42,3 +42,9 @@ def configure_logging(level: str | None = None) -> None:
 
 def get_logger(name: str | None = None):
     return structlog.get_logger(name)
+
+
+from src.observability.discord_alert import (  # noqa: E402, F401
+    DiscordWebhookHandler,
+    install_discord_alerts,
+)

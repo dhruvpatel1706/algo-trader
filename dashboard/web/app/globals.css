@@ -4,15 +4,73 @@
 
 :root {
   color-scheme: dark;
+
+  /* Design system tokens — Dark Mode (OLED) per ui-ux-pro-max */
+  --color-primary: #1e40af;
+  --color-secondary: #3b82f6;
+  --color-accent: #d97706;
+  --color-bg: #050608;
+  --color-surface: #0c0e13;
+  --color-surface-2: #11141b;
+  --color-border: #1f2330;
+  --color-border-strong: #2a3142;
+  --color-muted: #62718a;
+  --color-text: #e5e9f2;
+  --color-text-dim: #94a3b8;
+  --color-success: #10b981;
+  --color-success-glow: rgba(16, 185, 129, 0.15);
+  --color-danger: #ef4444;
+  --color-danger-glow: rgba(239, 68, 68, 0.15);
+  --color-warn: #f59e0b;
+  --color-info: #38bdf8;
 }
 
 html,
 body {
-  @apply bg-bg text-zinc-100 antialiased;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: "Fira Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.font-mono,
+.tabular {
+  font-family: "Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 * {
   scrollbar-color: #2a2f38 transparent;
+}
+
+/* Subtle pulse used on freshly-arrived signals */
+@keyframes pulse-once {
+  0% {
+    background-color: rgba(56, 189, 248, 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.pulse-once {
+  animation: pulse-once 1.6s ease-out;
+}
+
+/* Profit / loss text glow — kept extremely subtle per OLED rule */
+.glow-up {
+  text-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+}
+.glow-down {
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+}
+
+/* Reduced-motion users — disable all animations */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

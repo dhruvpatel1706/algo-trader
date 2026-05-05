@@ -98,3 +98,4 @@ logs/
 # Postgres / Redis volumes (compose names them, but in case of bind mounts)
 pgdata/
 redisdata/
+.codex/

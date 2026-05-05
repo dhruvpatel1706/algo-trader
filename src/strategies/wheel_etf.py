@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from src.data.universe import Universe
 from src.strategies.base import Signal, Strategy
 
 
@@ -77,7 +78,7 @@ class WheelEtf(Strategy):
         self.params: WheelParams = params if params is not None else WheelParams()
 
     def universe(self) -> tuple[str, ...]:
-        return ("SPY", "QQQ")
+        return Universe.for_strategy(self.name)
 
     def generate_signals(self, bars: dict[str, Any]) -> list[Signal]:
         # v1 stub: no signals until options chain + IVR + Greeks land in src/data/.

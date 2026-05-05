@@ -33,6 +33,7 @@ from decimal import Decimal
 
 import pandas as pd
 
+from src.data.universe import Universe
 from src.signals.indicators import adx, atr, bollinger_bands, rsi
 from src.strategies.base import Signal, Strategy
 
@@ -72,7 +73,7 @@ class MrEtf(Strategy):
         self.params: MrParams = params if params is not None else MrParams()
 
     def universe(self) -> tuple[str, ...]:
-        return ("SPY", "QQQ")
+        return Universe.for_strategy(self.name)
 
     def generate_signals(self, bars: dict[str, pd.DataFrame]) -> list[Signal]:
         signals: list[Signal] = []

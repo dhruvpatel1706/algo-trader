@@ -23,9 +23,8 @@ from src.backtest.metrics import summarize
 from src.backtest.walk_forward import run_walk_forward
 from src.config import PROJECT_ROOT
 from src.data.loader import load_daily_bars
+from src.data.universe import Universe
 from src.strategies import load_strategy
-
-_INDEX_ETFS = {"SPY", "QQQ", "IWM", "DIA"}
 
 
 def _git_sha() -> str:
@@ -70,7 +69,9 @@ def main() -> int:
     metrics["period"] = [args.start, args.end]
     metrics["warnings"] = result.warnings
     metrics["survivorship_check"] = (
-        "explicit_index_membership" if all(s in _INDEX_ETFS for s in strat.universe()) else "none"
+        "explicit_index_membership"
+        if all(Universe.is_index_etf(s) for s in strat.universe())
+        else "none"
     )
 
     out_dir = PROJECT_ROOT / "backtests" / strat.name / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

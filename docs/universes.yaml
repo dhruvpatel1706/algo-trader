@@ -36,6 +36,143 @@ liquid_etfs_top20:
   - TLT     # 20+ year Treasury
   - HYG     # High-yield corporate bond
 
+gold:
+  - GLD     # SPDR Gold ETF — equity proxy, broker-tradeable on Alpaca
+  - IAU     # iShares Gold Trust — alternative ETF
+  - GDX     # VanEck Gold Miners ETF — beta-amplified gold exposure
+
+bonds:
+  - TLT     # 20+ year Treasury
+  - IEF     # 7-10 year Treasury
+  - SHY     # 1-3 year Treasury
+  - AGG     # Aggregate bond
+  - BND     # Total bond
+  - HYG     # High-yield corporate bond
+  - LQD     # Investment-grade corporate bond
+
+crypto_majors:
+  - BTCUSDT
+  - ETHUSDT
+
+# Symbols flagged as broad-market index ETFs. Used by survivorship-bias check
+# in src/backtest/cli.py and the universe.is_index_etf() helper.
+index_etfs:
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+  - IVV
+  - VOO
+  - VTI
+
+# Per-strategy universe assignment. A strategy reads
+# Universe.for_strategy(self.name) and gets the list keyed here. Default is
+# `spy_qqq` if a strategy is not listed.
+strategy_universes:
+  mr_etf: spy_qqq
+  wheel_etf: spy_qqq
+  failed_breakout: liquid_etfs_top20
+  ma_pullback_trend: large_caps_50
+  range_shift_pullback: liquid_etfs_top20
+  momentum_xs: large_caps_50
+  failed_breakout_gold: gold
+  ma_pullback_trend_gold: gold
+  ma_pullback_trend_bonds: bonds
+  failed_breakout_crypto: crypto_majors
+  ma_pullback_trend_crypto: crypto_majors
+
+# Coarse sector map used by the multi-strategy engine to enforce sector
+# exposure caps. Symbols not listed here are treated as `other`.
+sector_map:
+  # Tech
+  AAPL: tech
+  MSFT: tech
+  NVDA: tech
+  GOOGL: tech
+  GOOG: tech
+  META: tech
+  AMZN: tech
+  AVGO: tech
+  CRM: tech
+  ADBE: tech
+  CSCO: tech
+  ACN: tech
+  INTC: tech
+  AMD: tech
+  IBM: tech
+  NFLX: tech
+  TSLA: tech
+  # Financials
+  JPM: financials
+  BAC: financials
+  WFC: financials
+  V: financials
+  MA: financials
+  BRK-B: financials
+  # Healthcare
+  JNJ: healthcare
+  UNH: healthcare
+  PFE: healthcare
+  ABBV: healthcare
+  MRK: healthcare
+  TMO: healthcare
+  ABT: healthcare
+  LLY: healthcare
+  DHR: healthcare
+  BMY: healthcare
+  # Energy
+  XOM: energy
+  CVX: energy
+  COP: energy
+  # Consumer
+  HD: consumer_disc
+  MCD: consumer_disc
+  NKE: consumer_disc
+  DIS: consumer_disc
+  PG: consumer_staples
+  KO: consumer_staples
+  PEP: consumer_staples
+  WMT: consumer_staples
+  COST: consumer_staples
+  # Communications
+  T: communications
+  VZ: communications
+  CMCSA: communications
+  # Industrials/utilities/other
+  RTX: industrials
+  NEE: utilities
+  # Index ETFs
+  SPY: index_etf
+  QQQ: index_etf
+  IWM: index_etf
+  DIA: index_etf
+  IVV: index_etf
+  VOO: index_etf
+  VTI: index_etf
+  # Sector ETFs
+  XLK: tech
+  XLF: financials
+  XLV: healthcare
+  XLE: energy
+  XLY: consumer_disc
+  XLP: consumer_staples
+  # Bonds
+  TLT: bonds
+  IEF: bonds
+  SHY: bonds
+  AGG: bonds
+  BND: bonds
+  HYG: bonds
+  LQD: bonds
+  # Commodities
+  GLD: commodities
+  IAU: commodities
+  GDX: commodities
+  SLV: commodities
+  # International
+  EFA: international
+  EEM: international
+
 large_caps_50:
   - AAPL
   - MSFT

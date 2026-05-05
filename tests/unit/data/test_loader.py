@@ -8,8 +8,51 @@ from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 import pytest
+from src.data import loader
 from src.data.loader import load_daily_bars
+
+
+def _bars(start: str, periods: int) -> pd.DataFrame:
+    idx = pd.date_range(start, periods=periods, freq="B", tz="UTC")
+    return pd.DataFrame(
+        {
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1_000_000,
+        },
+        index=idx,
+    )
+
+
+def test_loader_refetches_when_cache_does_not_cover_requested_range(monkeypatch, tmp_path):
+    monkeypatch.setattr(loader, "_CACHE_DIR", tmp_path)
+    (tmp_path / "SPY_1d.parquet").write_bytes(b"")
+    partial = _bars("2022-01-03", 5)
+    partial.to_parquet(tmp_path / "SPY_1d.parquet")
+
+    fetched = _bars("2020-01-02", 20)
+    calls = {"count": 0}
+
+    def fake_fetch(symbol, start, end):
+        calls["count"] += 1
+        assert symbol == "SPY"
+        return fetched
+
+    monkeypatch.setattr(loader, "_fetch_alpaca", fake_fetch)
+    out = load_daily_bars(
+        ("SPY",),
+        date(2020, 1, 2),
+        date(2020, 1, 29),
+        use_cache=True,
+        fallback_to_yfinance=False,
+    )
+
+    assert calls["count"] == 1
+    assert len(out["SPY"]) == 20
 
 
 @pytest.mark.network

@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["signal-engine"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "Proprietary"
+authors = ["algo-trader"]
+publish = false
+
+[workspace.dependencies]
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py312"] }
+numpy = "0.22"
+ndarray = "0.16"

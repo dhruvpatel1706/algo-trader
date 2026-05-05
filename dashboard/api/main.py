@@ -37,6 +37,7 @@ from dashboard.api.broker_proxy import BrokerProxy, get_broker_proxy
 from dashboard.api.dashboard_metrics import trailing_metrics
 from dashboard.api.journal_reader import read_trades
 from dashboard.api.kill import execute_kill, list_incidents
+from dashboard.api.multi_agent import router as multi_agent_router
 from dashboard.api.state import DashboardState, get_state
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# Multi-agent dashboard endpoints (per-agent status, alt-data, moonshot lanes).
+app.include_router(multi_agent_router)
 
 
 class KillRequest(BaseModel):

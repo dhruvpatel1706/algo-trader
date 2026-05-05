@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<ownershipDocument>
+  <schemaVersion>X0506</schemaVersion>
+  <documentType>4</documentType>
+  <periodOfReport>2024-08-20</periodOfReport>
+  <issuer>
+    <issuerCik>0001234567</issuerCik>
+    <issuerName>Acme Corp</issuerName>
+    <issuerTradingSymbol>ACME</issuerTradingSymbol>
+  </issuer>
+  <reportingOwner>
+    <reportingOwnerId>
+      <rptOwnerCik>0009999999</rptOwnerCik>
+      <rptOwnerName>DOE JANE</rptOwnerName>
+    </reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>0</isDirector>
+      <isOfficer>1</isOfficer>
+      <isTenPercentOwner>0</isTenPercentOwner>
+      <isOther>0</isOther>
+      <officerTitle>CFO</officerTitle>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <securityTitle>
+        <value>Common Stock</value>
+      </securityTitle>
+      <transactionDate>
+        <value>2024-08-20</value>
+      </transactionDate>
+      <transactionCoding>
+        <transactionFormType>4</transactionFormType>
+        <transactionCode>S</transactionCode>
+        <equitySwapInvolved>0</equitySwapInvolved>
+        <rule10b5-1Flag>
+          <value>1</value>
+        </rule10b5-1Flag>
+      </transactionCoding>
+      <transactionAmounts>
+        <transactionShares>
+          <value>500</value>
+        </transactionShares>
+        <transactionPricePerShare>
+          <value>52.00</value>
+        </transactionPricePerShare>
+        <transactionAcquiredDisposedCode>
+          <value>D</value>
+        </transactionAcquiredDisposedCode>
+      </transactionAmounts>
+      <ownershipNature>
+        <directOrIndirectOwnership>
+          <value>D</value>
+        </directOrIndirectOwnership>
+      </ownershipNature>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+  <footnotes>
+    <footnote id="F1">This sale was made pursuant to a Rule 10b5-1 trading plan adopted on 2024-01-15.</footnote>
+  </footnotes>
+</ownershipDocument>

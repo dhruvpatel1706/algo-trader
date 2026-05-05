@@ -44,6 +44,10 @@ dependencies = [
   "psycopg2-binary>=2.9",
   "alembic>=1.14",
   "greenlet>=3.0",
+  "lightgbm>=4.6.0",
+  "scikit-learn>=1.8.0",
+  "apscheduler>=3.10",
+  "fakeredis>=2.24",
 ]
 
 [project.optional-dependencies]
@@ -80,22 +84,32 @@ select = ["E", "F", "I", "B", "UP", "N", "PL", "RUF", "S", "ASYNC"]
 ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S105", "S106", "PLR2004", "S311", "PLR0915"]
+"tests/**" = [
+  "S105", "S106", "PLR2004", "S311", "PLR0915",
+  # Test fixtures often import after monkeypatch / inside test bodies.
+  "PLC0415",
+  # Tests legitimately use subprocess.run without `check=` for assertion-driven flows.
+  "S603", "PLW1510",
+]
 "scripts/**" = ["T201", "S603", "S607", "PLC0415", "S110", "PLR0915", "E501", "RUF001", "RUF059"]
-# Lazy imports here are intentional defensive fallbacks (alpaca/yfinance optional at import time).
+# Lazy imports here are intentional defensive fallbacks (alpaca/yfinance/anthropic optional at import time).
 "src/execution/broker.py" = ["PLC0415"]
 "src/data/loader.py" = ["PLC0415"]
+"src/moonshot/llm_discretionary.py" = ["PLC0415"]
 # CLI script: hardcoded `git` invocation is safe (no user input).
 "src/backtest/cli.py" = ["S603", "S607"]
+# Sklearn / ML convention: capital `X` for the design matrix is universal — fighting it
+# would diverge from every published ML reference. Tests and production both use it.
+"src/ml/**" = ["N803", "N806"]
+"tests/unit/ml/**" = ["N803", "N806"]
 # FastAPI uses Query()/Depends() in arg defaults idiomatically.
 "dashboard/api/main.py" = ["B008"]
+# multi_agent.py defensively imports optional alt-data deps inside request handlers
+# so a missing module never breaks endpoints that don't use it.
+"dashboard/api/multi_agent.py" = ["PLC0415"]
 # Singletons + lazy alpaca imports inside dashboard helpers are intentional.
 "dashboard/api/broker_proxy.py" = ["PLC0415", "PLW0603"]
 "dashboard/api/state.py" = ["PLW0603"]
-# Test fixtures sometimes need import-after-monkeypatch ordering.
-"tests/unit/test_dashboard_api.py" = ["PLC0415"]
-"tests/unit/test_observability.py" = ["PLC0415"]
-"tests/unit/data/test_loader.py" = ["PLC0415"]
 # Integration tests legitimately shell out via subprocess.
 "tests/integration/**" = ["S603", "S607", "PLW1510"]
 
