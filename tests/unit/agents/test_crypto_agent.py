@@ -5,6 +5,8 @@ from __future__ import annotations
 from src.agents.base import AssetClass
 from src.agents.crypto_agent import CryptoAgent
 from src.data.universe import Universe
+from src.strategies.failed_breakout_crypto import FailedBreakoutCrypto
+from src.strategies.ma_pullback_trend_crypto import MaPullbackTrendCrypto
 
 
 def test_crypto_agent_default_universe_non_empty():
@@ -15,12 +17,14 @@ def test_crypto_agent_default_universe_non_empty():
     assert len(a.universe) > 0
 
 
-def test_crypto_agent_starts_with_empty_strategy_list():
+def test_crypto_agent_wires_two_default_strategies():
     a = CryptoAgent()
-    assert a.strategies == []
+    assert len(a.strategies) == 2
+    types = {type(s) for s in a.strategies}
+    assert types == {FailedBreakoutCrypto, MaPullbackTrendCrypto}
 
 
-def test_crypto_agent_evaluate_returns_empty_with_no_strategies():
+def test_crypto_agent_evaluate_with_no_bars_returns_empty():
     a = CryptoAgent()
     out = a.evaluate({})
     assert out == []

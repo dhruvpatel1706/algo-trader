@@ -1,9 +1,10 @@
-"""Crypto agent — runs the crypto-tuned long-only strategies.
+"""Silver agent — placeholder container for silver-class strategies.
 
-v1 wires the two crypto-tuned variants (failed-breakout and 20/200 MA pullback)
-on the crypto majors universe (BTCUSDT, ETHUSDT). Parameters are tuned for
-crypto's faster ranges, higher volatility, and thinner liquidity — see each
-strategy's docstring.
+v1 ships with no strategies wired in. Universe is the silver ETF list; strategies
+will land here as silver variants of trend/pullback are productionised.
+
+Activity hint: watching SLV/SIVR/SIL/PSLV for failed-breakdown rejection +
+20/200 SMA pullback (paper-only commodities exposure).
 """
 
 from __future__ import annotations
@@ -14,15 +15,13 @@ from typing import Any
 from src.agents.base import Agent, AssetClass
 from src.data.universe import Universe
 from src.strategies.base import Signal, Strategy
-from src.strategies.failed_breakout_crypto import FailedBreakoutCrypto
-from src.strategies.ma_pullback_trend_crypto import MaPullbackTrendCrypto
 
 
-class CryptoAgent(Agent):
-    """Container for crypto-class strategies."""
+class SilverAgent(Agent):
+    """Container for silver-class strategies (empty in v1)."""
 
-    name = "crypto_agent"
-    asset_class = AssetClass.CRYPTO
+    name = "silver_agent"
+    asset_class = AssetClass.SILVER
 
     def __init__(
         self,
@@ -31,9 +30,9 @@ class CryptoAgent(Agent):
         heat_allocation: float = 0.0,
     ) -> None:
         if strategies is None:
-            strategies = [FailedBreakoutCrypto(), MaPullbackTrendCrypto()]
+            strategies = []
         if universe is None:
-            universe = Universe.named("crypto_majors")
+            universe = Universe.named("silver")
         super().__init__(strategies=strategies, universe=universe, heat_allocation=heat_allocation)
 
     def evaluate(self, bars: dict[str, Any]) -> list[Signal]:

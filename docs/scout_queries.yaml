@@ -1,0 +1,27 @@
+# Default search queries for scripts/scout_strategies.py.
+# Operator can edit to scope future scans. Comments (#) and blank lines OK.
+# Format is a small subset of YAML: 'group:' followed by '- "query"' lines.
+
+equity:
+  - "mean reversion ETF python"
+  - "RSI strategy backtest"
+  - "Donchian breakout trading"
+  - "20 200 SMA crossover"
+
+crypto:
+  - "BTC funding rate strategy"
+  - "crypto momentum ETH"
+  - "perpetual basis trade"
+
+gold:
+  - "gold COMEX positioning"
+  - "GLD volatility breakout"
+
+options:
+  - "wheel strategy CSP"
+  - "iron condor SPX"
+
+quant_research:
+  - "Sharpe ratio backtest"
+  - "walk forward optimization"
+  - "Lopez de Prado triple barrier"

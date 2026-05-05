@@ -21,8 +21,10 @@ export default function AgentDetail({
 
   // Backend identifies agents by `name`. The dynamic route is parameterized as
   // `id` purely for URL hygiene; we resolve it against `name`.
+  // Coherence is strategy-keyed; we don't try to find a per-agent coherence
+  // here (would need a different endpoint). Falls back to agent.coherence below.
   const agent = (agentsQ.data ?? []).find((a) => a.name === decodedId);
-  const coh = (coherenceQ.data ?? []).find((c) => c.agent === decodedId);
+  const coh = coherenceQ.data?.[0] ?? null;
 
   return (
     <main className="min-h-screen bg-bg">
@@ -75,10 +77,12 @@ export default function AgentDetail({
                 <h2 className="mb-3 text-sm font-semibold text-zinc-200">coherence</h2>
                 {coh ? (
                   <CoherenceGauge
-                    ratio={coh.ratio}
-                    thresholdWarn={coh.threshold_warn}
-                    thresholdHalt={coh.threshold_halt}
-                    label={`live ${(coh.live_win_rate * 100).toFixed(1)}% / bt ${(coh.backtest_win_rate * 100).toFixed(1)}%`}
+                    ratio={coh.coherence ?? 0}
+                    label={
+                      coh.live_win_rate != null && coh.backtest_win_rate != null
+                        ? `live ${(coh.live_win_rate * 100).toFixed(1)}% / bt ${(coh.backtest_win_rate * 100).toFixed(1)}%`
+                        : `${coh.strategy} (no live data)`
+                    }
                   />
                 ) : (
                   <CoherenceGauge

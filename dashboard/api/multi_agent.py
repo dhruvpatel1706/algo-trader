@@ -202,6 +202,7 @@ def _build_agents() -> list[Any]:
     candidates = [
         ("src.agents.equity_agent", "EquityAgent"),
         ("src.agents.gold_agent", "GoldAgent"),
+        ("src.agents.silver_agent", "SilverAgent"),
         ("src.agents.bonds_agent", "BondsAgent"),
         ("src.agents.crypto_agent", "CryptoAgent"),
     ]

@@ -60,6 +60,10 @@ dev = [
   "respx>=0.21",
   "ruff>=0.8",
   "mypy>=1.13",
+  "hypothesis>=6.100",
+  # Bug hunter — security + dead-code analyzers (used by scripts/bug_hunt.py).
+  "bandit>=1.7",
+  "vulture>=2.13",
 ]
 
 [build-system]
@@ -91,7 +95,7 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
   # Tests legitimately use subprocess.run without `check=` for assertion-driven flows.
   "S603", "PLW1510",
 ]
-"scripts/**" = ["T201", "S603", "S607", "PLC0415", "S110", "PLR0915", "E501", "RUF001", "RUF059"]
+"scripts/**" = ["T201", "S603", "S607", "PLC0415", "S110", "PLR0915", "PLR0912", "E501", "RUF001", "RUF059"]
 # Lazy imports here are intentional defensive fallbacks (alpaca/yfinance/anthropic optional at import time).
 "src/execution/broker.py" = ["PLC0415"]
 "src/data/loader.py" = ["PLC0415"]
@@ -121,6 +125,7 @@ markers = [
   "integration: integration tests (deselect with '-m \"not integration\"')",
   "broker: requires paper broker connection",
   "network: hits the network (yfinance, etc.)",
+  "property: hypothesis property-based tests (slow, deselect with '-m \"not property\"')",
 ]
 
 [tool.coverage.run]

@@ -98,25 +98,25 @@ export function LiveTradesFeed() {
 
   return (
     <section className="rounded-2xl border border-border bg-surface shadow-card-soft">
-      <header className="flex items-center justify-between border-b border-border px-5 py-3">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between border-b border-border px-4 py-2">
+        <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold tracking-wide text-text">live trades</h2>
           {usingDemo && (
             <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
               demo
             </span>
           )}
-          <span className="font-mono text-[11px] text-text-dim">
-            {visible.length} of {rows.length}
+          <span className="font-mono text-[10px] text-text-dim">
+            {visible.length}/{rows.length}
           </span>
         </div>
-        <div className="flex gap-1 rounded-lg border border-border bg-bg p-1">
+        <div className="flex gap-1 rounded-md border border-border bg-bg p-0.5">
           {(["all", "open", "closed"] as const).map((k) => (
             <button
               type="button"
               key={k}
               onClick={() => setFilter(k)}
-              className={`rounded px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider transition ${
+              className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition ${
                 filter === k
                   ? "bg-surface-2 text-text shadow-card-soft"
                   : "text-text-dim hover:text-text"
@@ -128,21 +128,21 @@ export function LiveTradesFeed() {
         </div>
       </header>
       <div className="max-h-[480px] overflow-x-auto overflow-y-auto">
-        <table className="min-w-full text-[12px]">
+        <table className="min-w-full font-mono text-[11px]">
           <thead className="sticky top-0 bg-surface text-text-dim">
             <tr className="font-mono text-[10px] uppercase tracking-wider">
-              <th className="px-4 py-2 text-left">time</th>
-              <th className="px-4 py-2 text-left">symbol</th>
-              <th className="px-4 py-2 text-left">side</th>
-              <th className="px-4 py-2 text-left">agent · strategy</th>
-              <th className="px-4 py-2 text-right">qty</th>
-              <th className="px-4 py-2 text-right">entry</th>
-              <th className="px-4 py-2 text-right">stop</th>
-              <th className="px-4 py-2 text-right">target</th>
-              <th className="px-4 py-2 text-right">P&L $</th>
-              <th className="px-4 py-2 text-right">P&L %</th>
-              <th className="px-4 py-2 text-left">filters</th>
-              <th className="px-4 py-2 text-right">state</th>
+              <th className="px-3 py-1.5 text-left">time</th>
+              <th className="px-3 py-1.5 text-left">symbol</th>
+              <th className="px-3 py-1.5 text-left">side</th>
+              <th className="px-3 py-1.5 text-left">agent · strategy</th>
+              <th className="px-3 py-1.5 text-right">qty</th>
+              <th className="px-3 py-1.5 text-right">entry</th>
+              <th className="px-3 py-1.5 text-right">stop</th>
+              <th className="px-3 py-1.5 text-right">target</th>
+              <th className="px-3 py-1.5 text-right">P&L $</th>
+              <th className="px-3 py-1.5 text-right">P&L %</th>
+              <th className="px-3 py-1.5 text-left">filters</th>
+              <th className="px-3 py-1.5 text-right">state</th>
             </tr>
           </thead>
           <tbody>
@@ -158,38 +158,38 @@ export function LiveTradesFeed() {
                   key={r.id}
                   className="border-t border-border/60 transition hover:bg-surface-2"
                 >
-                  <td className="whitespace-nowrap px-4 py-2 font-mono text-text-dim" title={r.ts}>
-                    <div>{fmtTime(r.ts)}</div>
-                    <div className="text-[10px] text-text-dim/70">{fmtRelative(r.ts)}</div>
+                  <td className="whitespace-nowrap px-3 py-1 font-mono text-text-dim" title={r.ts}>
+                    <span className="text-text">{fmtTime(r.ts)}</span>
+                    <span className="ml-1.5 text-[10px] text-text-dim/70">{fmtRelative(r.ts)}</span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2 font-mono font-semibold text-text">
+                  <td className="whitespace-nowrap px-3 py-1 font-mono font-semibold text-text">
                     {r.symbol}
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-3 py-1">
                     <SideBadge side={r.side} />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2 text-text-dim">
-                    <div className="text-[11px] text-text">{r.agent}</div>
-                    <div className="font-mono text-[10px] text-text-dim">{r.strategy}</div>
+                  <td className="whitespace-nowrap px-3 py-1 text-text-dim">
+                    <span className="text-text">{r.agent}</span>
+                    <span className="ml-1.5 text-[10px] text-text-dim">{r.strategy}</span>
                   </td>
-                  <td className="px-4 py-2 text-right font-mono text-text">{r.qty}</td>
-                  <td className="px-4 py-2 text-right font-mono text-text">
+                  <td className="px-3 py-1 text-right text-text">{r.qty}</td>
+                  <td className="px-3 py-1 text-right text-text">
                     {fmtUsd(r.entry)}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono text-text-dim">
+                  <td className="px-3 py-1 text-right text-text-dim">
                     {fmtUsd(r.stop)}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono text-text-dim">
+                  <td className="px-3 py-1 text-right text-text-dim">
                     {fmtUsd(r.target)}
                   </td>
-                  <td className={`px-4 py-2 text-right font-mono ${pnlColorClass(r.pnl)}`}>
+                  <td className={`px-3 py-1 text-right ${pnlColorClass(r.pnl)}`}>
                     {r.pnl == null ? "—" : fmtUsdSigned(r.pnl)}
                   </td>
-                  <td className={`px-4 py-2 text-right font-mono ${pnlColorClass(r.pnl_pct)}`}>
+                  <td className={`px-3 py-1 text-right ${pnlColorClass(r.pnl_pct)}`}>
                     {r.pnl_pct == null ? "—" : fmtPctSigned(r.pnl_pct)}
                   </td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
+                  <td className="px-3 py-1">
+                    <div className="flex flex-wrap gap-0.5">
                       {r.filter_status.length === 0 ? (
                         <span className="text-text-dim/60">—</span>
                       ) : (
@@ -197,7 +197,7 @@ export function LiveTradesFeed() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-3 py-1 text-right">
                     <StateBadge state={r.state} />
                   </td>
                 </tr>

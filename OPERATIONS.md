@@ -123,6 +123,27 @@ cat journal/*.jsonl | jq 'select(.event=="submit")'
 
 Daily files are gitignored — operator-private.
 
+## Bug hunt
+
+Run before every release / before flipping any strategy to live capital:
+
+```
+uv run python scripts/bug_hunt.py
+# or for a fast iteration loop (skips mypy + test-health pass):
+uv run python scripts/bug_hunt.py --quick
+```
+
+Output is appended to `docs/bug_hunt.md` as a dated, severity-ranked section.
+The doc is committed so the bug-hunt history is reviewable. Critical findings
+exit with code 1 (suitable for a CI gate). Suppress a single-line false
+positive with `# noqa: bug-hunt:<pattern>`.
+
+Three classes of analysis run:
+1. Off-the-shelf static analyzers (ruff, mypy --strict, bandit, vulture)
+2. Domain-specific AST patterns (look-ahead bias, tz-naive datetime, broad
+   except, missing fsync on the journal, Decimal/float mixing, etc.)
+3. Test-suite health (test counts, slowest tests, optional flake check)
+
 ## Smoke the paper pipeline
 
 ```bash

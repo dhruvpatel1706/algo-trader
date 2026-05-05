@@ -22,10 +22,13 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.agents.base import Agent, AssetClass
 from src.strategies.base import Signal
+
+if TYPE_CHECKING:
+    from src.agents.governance_memory import GovernanceMemory
 
 GovernanceAction = Literal["kill", "promote", "halt", "unhalt", "investigate"]
 
@@ -69,6 +72,7 @@ class GovernanceAgent(Agent):
         universe: tuple[str, ...] | None = None,
         heat_allocation: float = 0.0,
         coherence_kill_threshold: float = 0.5,
+        memory: GovernanceMemory | None = None,
     ) -> None:
         super().__init__(
             strategies=strategies or [],
@@ -76,6 +80,10 @@ class GovernanceAgent(Agent):
             heat_allocation=heat_allocation,
         )
         self.coherence_kill_threshold = coherence_kill_threshold
+        # Memory is optional opt-in. When unset, evaluate() behaves exactly as
+        # before — no I/O, no persistence. Wiring a GovernanceMemory in adds
+        # cross-session recall without touching the Agent ABC.
+        self._memory = memory
 
     def evaluate(self, state: Any = None) -> list[Signal] | list[GovernanceRecommendation]:  # type: ignore[override]
         """Apply policy over a state object, return list[GovernanceRecommendation].
@@ -130,4 +138,26 @@ class GovernanceAgent(Agent):
                             ts=now,
                         )
                     )
+
+        # Persist every emitted recommendation to memory if attached. We only
+        # write decisions here — observations are the responsibility of the
+        # caller that owns the live data feed.
+        if self._memory is not None:
+            for rec in recs:
+                self._memory.add(
+                    kind="decision",
+                    content=rec.reason,
+                    target_strategy=rec.target_strategy,
+                    metadata={"action": rec.action, "confidence": rec.confidence},
+                )
         return recs
+
+    def memory_summary(self) -> str:
+        """Return a prompt-ready summary of long-term observations.
+
+        Empty string when no memory is attached, so callers can unconditionally
+        concatenate this into a system prompt without a None-check.
+        """
+        if self._memory is None:
+            return ""
+        return self._memory.summary_for_prompt()

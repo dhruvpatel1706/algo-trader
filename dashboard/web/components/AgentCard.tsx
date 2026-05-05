@@ -5,6 +5,7 @@ import Link from "next/link";
 const ASSET_ICON: Record<AssetClass, string> = {
   equity: "EQ",
   gold: "AU",
+  silver: "AG",
   bonds: "BND",
   crypto: "BTC",
   governance: "GOV",

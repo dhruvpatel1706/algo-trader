@@ -1,12 +1,19 @@
-"""Trade-level risk gate. `check_limits()` is the canonical risk-manager entry point."""
+"""Trade-level risk gate. `check_limits()` is the canonical risk-manager entry point.
+
+`compliance_check_option()` is the analogous entry point for option orders;
+see ``src/risk/option_limits.py`` for the underlying caps.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from typing import Literal
 
 from src.config import get_settings
+from src.execution.option_order import OptionOrder
+from src.risk.option_limits import OptionLimitError, OptionLimits, check_option_order
 from src.risk.sizing import drawdown_fraction, portfolio_heat, position_size
 
 
@@ -89,3 +96,40 @@ def check_limits(proposed: ProposedTrade, snapshot: PortfolioSnapshot) -> Decisi
         )
 
     return Decision(True, "all caps OK", adjusted_size=qty)
+
+
+def compliance_check_option(
+    order: OptionOrder,
+    equity: Decimal,
+    open_csp_contracts: int,
+    today: date | None = None,
+    limits: OptionLimits | None = None,
+) -> Decision:
+    """Compliance gate for option orders.
+
+    v1 policy (see ``docs/policy.md`` §6 "Account type"): the only allowed
+    option strategies are covered_call, cash_secured_put, and protective_put.
+    Naked options are rejected at :class:`OptionOrder` construction; this gate
+    additionally enforces the quantitative caps in
+    :func:`src.risk.option_limits.check_option_order`.
+
+    Returns an APPROVE :class:`Decision` on pass, REJECT with a populated
+    ``reason`` on any cap violation. The caller passes the ``Decision`` to
+    :func:`src.execution.broker.approval_token` exactly like the equity path.
+    """
+    today = today or date.today()
+    try:
+        check_option_order(
+            order=order,
+            equity=equity,
+            open_csp_contracts=open_csp_contracts,
+            today=today,
+            limits=limits,
+        )
+    except OptionLimitError as exc:
+        return Decision(False, f"option compliance rejected: {exc}")
+
+    return Decision(
+        True,
+        f"option compliance OK ({order.strategy_kind}, max_loss={order.max_loss_usd})",
+    )

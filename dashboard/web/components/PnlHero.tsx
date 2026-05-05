@@ -81,13 +81,13 @@ export function PnlHero() {
   ];
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-surface to-bg p-6 shadow-card-soft">
+    <section className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-surface to-bg px-4 py-3 shadow-card-soft">
       {usingDemo && (
-        <span className="absolute right-4 top-4 rounded-md border border-warn/30 bg-warn/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
-          demo data
+        <span className="absolute right-3 top-2 rounded-md border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
+          demo
         </span>
       )}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {stats.map((s, i) => {
           const emph =
             s.emphasis === "pos"
@@ -100,16 +100,16 @@ export function PnlHero() {
           return (
             <div
               key={s.label}
-              className={`flex flex-col gap-1.5 ${i > 0 ? "md:border-l md:border-border md:pl-6" : ""}`}
+              className={`flex flex-col gap-0.5 ${i > 0 ? "md:border-l md:border-border md:pl-4" : ""}`}
             >
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-dim">
+              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-text-dim">
                 {s.label}
               </span>
-              <span className={`font-mono text-3xl font-semibold leading-none ${emph} ${glow}`}>
+              <span className={`font-mono text-2xl font-semibold leading-none ${emph} ${glow}`}>
                 {s.value}
               </span>
               {s.detail && (
-                <span className="font-mono text-xs text-text-dim">{s.detail}</span>
+                <span className="font-mono text-[10px] text-text-dim">{s.detail}</span>
               )}
             </div>
           );
@@ -117,7 +117,7 @@ export function PnlHero() {
       </div>
       {sparkPath && (
         <svg
-          className="mt-4 h-10 w-full text-secondary/60"
+          className="mt-2 h-6 w-full text-secondary/60"
           viewBox="0 0 96 28"
           preserveAspectRatio="none"
           aria-hidden

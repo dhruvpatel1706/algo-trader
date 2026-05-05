@@ -25,12 +25,21 @@ class TradeRecord:
 _TRADING_DAYS = 252
 
 
+# Numerical floor for std-deviation comparisons. A constant non-zero series
+# (e.g. pd.Series([0.001]*n)) mathematically has std=0 but pandas' ddof=1
+# computation produces ~2e-19 from floating-point error, slipping past
+# `sd == 0` and yielding a Sharpe of ~7e+16. Found by property-based test in
+# tests/property/test_metrics_properties.py. Floor at 1e-12 — well below any
+# real-world return std (which is ~1e-3 for daily) and well above f64 noise.
+_STD_FLOOR = 1e-12
+
+
 def annualized_sharpe(returns: pd.Series, rf: float = 0.0) -> float:
     if len(returns) < 2:
         return 0.0
     excess = returns - rf / _TRADING_DAYS
     sd = excess.std(ddof=1)
-    if sd == 0 or np.isnan(sd):
+    if not np.isfinite(sd) or sd < _STD_FLOOR:
         return 0.0
     return float(excess.mean() / sd * np.sqrt(_TRADING_DAYS))
 
@@ -43,7 +52,7 @@ def annualized_sortino(returns: pd.Series, rf: float = 0.0) -> float:
     if len(downside) < 2:
         return 0.0
     sd = downside.std(ddof=1)
-    if sd == 0 or np.isnan(sd):
+    if not np.isfinite(sd) or sd < _STD_FLOOR:
         return 0.0
     return float(excess.mean() / sd * np.sqrt(_TRADING_DAYS))
 

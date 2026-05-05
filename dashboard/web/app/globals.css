@@ -65,6 +65,23 @@ body {
   text-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
 }
 
+/* News ticker — horizontal scroll, slow, pause on hover */
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+.ticker-scroll {
+  animation: ticker-scroll 90s linear infinite;
+  will-change: transform;
+}
+.ticker-scroll-host:hover .ticker-scroll {
+  animation-play-state: paused;
+}
+
 /* Reduced-motion users — disable all animations */
 @media (prefers-reduced-motion: reduce) {
   *,

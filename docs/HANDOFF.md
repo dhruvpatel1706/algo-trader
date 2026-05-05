@@ -472,6 +472,51 @@ ALGOTRADER_NATIVE_INDICATORS=1 uv run pytest tests/unit/test_signals_indicators.
 
 The Rust unit tests (in `crates/signal-engine/src/lib.rs#tests`) verify SMA/EMA/ATR/WVF align with pandas-equivalent expected values. **Do NOT build it just because Rust is faster — the only justified trigger is a profiled hot-path showing ≥30% CPU in indicator code, or a tick-level backtest where Python is too slow to iterate.**
 
+## Round 2: feature pass (post-stabilization)
+
+After the stabilization checkpoint, a "go-crazy" pass added 10 modules in parallel agents while keeping the four gates green at every commit. **No new claim of production-readiness.** Each addition is scaffolded with unit-test coverage; live external integrations remain mocked.
+
+### What landed
+
+| Module | Files | Tests | Status |
+|---|---|---|---|
+| `silver_agent` | `src/agents/silver_agent.py` + `silver:` block in `docs/universes.yaml` | 5 | scaffolded |
+| Governance memory (long-term thinking) | `src/agents/governance_memory.py` (SQLite WAL, optional inject into `governance_agent`) | 23 | scaffolded |
+| News research per asset | `src/data/news_research.py` — keyword-scoped Finnhub fetches per asset class with confidence-weighted sentiment digest | 21 | scaffolded |
+| Macro-deal extractor | `src/data/macro_deal_extractor.py` — LLM extractor for "X invests $Yb in Z" patterns; conservative confidence + dollar-amount filters | 29 | scaffolded |
+| Options + short scaffold | `src/execution/option_order.py` + `src/risk/option_limits.py` — `OptionContract`/`OptionLeg`/`OptionOrder` with naked-options rejection in `__post_init__` | 31 | scaffolded |
+| Crypto-tuned strategies | `failed_breakout_crypto`, `ma_pullback_trend_crypto`; wired into `crypto_agent` defaults | 12 | scaffolded |
+| Bloomberg-density UI | `NewsTickerBar` + `AgentSidebar`; `PortfolioView` 4-col equity row; tightened hero/trades/analytics; ~190 px above-fold reduction | TS clean | scaffolded |
+| Strategy Research Scout | `src/research/strategy_scout.py` + `scripts/scout_strategies.py` — GitHub search + LLM evaluation → `docs/research_backlog.md` | 47 | scaffolded |
+| Property-based tests (hypothesis) | `tests/property/` — 65 properties across sizing/correlation/promotion/indicators/metrics/config | 65 | scaffolded |
+| Strategy catalog + cautionary tales | `docs/strategy_catalog.md` (12 academic/competition strategies, 9k words) + `docs/cautionary_tales.md` (8 famous blow-ups) + `docs/research_sources.md` (where to scout next) | docs | scaffolded |
+| Bug Hunter | `scripts/bug_hunt.py` + 23 tests — AST pattern scan + ruff/mypy/bandit/vulture wrapper, writes `docs/bug_hunt.md` | 23 | scaffolded |
+
+**New unit-test count:** 729 (was 542 baseline + ~187 new).
+**New property-test count:** 65 (1 of which is the regression guard for the bug below).
+**Bug found by property tests:** `src/backtest/metrics.py:33` — `annualized_sharpe()` returned ~7e+16 instead of 0.0 on constant non-zero return series because pandas `std(ddof=1)` returns ~2e-19 from float error, slipping past `if sd == 0`. Fixed: replaced equality check with `1e-12` floor in both `annualized_sharpe` and `annualized_sortino`. Regression test now lives at `tests/property/test_metrics_properties.py::test_sharpe_zero_variance_constant_nonzero_returns_zero`.
+**Bugs surfaced by Bug Hunter (bandit, mostly security audits — none critical):**
+1. SEC EDGAR XML parser uses `xml.etree.ElementTree` — vulnerable to billion-laughs / XXE entity attacks. **Switch to `defusedxml` before live capital.**
+2. `src/ml/predict.py` pickles model artifacts — RCE if artifact path is influenced by an attacker. Pin artifact integrity (hash check) before live.
+3. 7 `urllib.request.urlopen` sites without explicit `https`-only scheme validation. Add `assert url.startswith("https://")` before live.
+
+### Round-2 Bloomberg UI tightening
+
+Front-page real estate before / after:
+- Top stack: 145 px → 115 px (added 3 stats: positions, uptime, last_eval)
+- Hero card: 170 px → 110 px (4-stat grid + sparkline, mono numerics)
+- Analytics row: 290 px → 190 px (3-column: 4 metric tiles · 6 promo gates · cost+perf)
+- Equity row: ~same height, but now includes a 6-slot `AgentSidebar` (EQ/AU/AG/BD/CR/GV)
+- Net: ~190 px above-fold reduction; news ticker, agent sidebar, and 3 new top-bar stats fit in the same scroll region.
+
+### /agents tab fix
+
+`/agents` was crashing with `Each child in a list should have a unique "key" prop` because the frontend `CoherenceState` type expected `{agent, ratio, threshold_warn, threshold_halt}` but the backend `CoherenceResponse` returns `{strategy, coherence, halted, halt_reason, live_win_rate, backtest_win_rate}`. Fixed: aligned the frontend type to the backend, fanned out coherence requests across the known strategy set, rebuilt the page to render one tile per strategy (not per agent — coherence is strategy-scoped). Same drift fixed in `app/agents/[id]/page.tsx`.
+
+### Rust scaffold status
+
+`crates/Cargo.toml` + `crates/signal-engine/src/lib.rs` (~250 LOC, PyO3 bindings + numerical-equivalence unit tests) committed at the v1 stabilization point. Toolchain (`cargo`/`rustc`) is **not installed on this machine** — the crate can't be built until the operator runs `rustup`. Pure-Python path is unchanged and remains the default; opt in via `ALGOTRADER_NATIVE_INDICATORS=1` after `maturin develop --release`. See `docs/performance.md` for the latency-budget reality check (broker RTT dominates; Rust is research-grade for tick-level backtests, not production execution).
+
 ## Stabilization pass (post-Codex review)
 
 Codex called out (correctly) that the original "all 9 phases complete" framing oversold readiness and that lint + typecheck were red. This pass addressed exactly those:

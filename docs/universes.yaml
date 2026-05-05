@@ -41,6 +41,12 @@ gold:
   - IAU     # iShares Gold Trust — alternative ETF
   - GDX     # VanEck Gold Miners ETF — beta-amplified gold exposure
 
+silver:
+  - SLV     # iShares Silver Trust — main ETF
+  - SIVR    # abrdn Physical Silver Shares
+  - SIL     # Global X Silver Miners ETF
+  - PSLV    # Sprott Physical Silver Trust
+
 bonds:
   - TLT     # 20+ year Treasury
   - IEF     # 7-10 year Treasury
@@ -77,6 +83,7 @@ strategy_universes:
   momentum_xs: large_caps_50
   failed_breakout_gold: gold
   ma_pullback_trend_gold: gold
+  silver_agent: silver
   ma_pullback_trend_bonds: bonds
   failed_breakout_crypto: crypto_majors
   ma_pullback_trend_crypto: crypto_majors
@@ -169,6 +176,9 @@ sector_map:
   IAU: commodities
   GDX: commodities
   SLV: commodities
+  SIVR: commodities
+  SIL: commodities
+  PSLV: commodities
   # International
   EFA: international
   EEM: international

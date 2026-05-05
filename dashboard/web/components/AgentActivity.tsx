@@ -17,6 +17,7 @@ type AgentRow = {
 const ASSET_ICON: Record<string, string> = {
   equity: "▤",
   gold: "◇",
+  silver: "◈",
   bonds: "▭",
   crypto: "◊",
   governance: "⊙",
@@ -25,6 +26,7 @@ const ASSET_ICON: Record<string, string> = {
 const ASSET_LABEL: Record<string, string> = {
   equity: "Equities",
   gold: "Gold",
+  silver: "Silver",
   bonds: "Bonds",
   crypto: "Crypto",
   governance: "Governance",
@@ -48,12 +50,16 @@ const ACTIVITY_HINT: Record<string, string> = {
   governance_agent: "hourly: scoring strategy coherence, kill/promote candidates, drift checks",
 };
 
-export function AgentActivity() {
-  const agentsQ = useQuery({
+function useAgents() {
+  return useQuery({
     queryKey: ["agents"],
     queryFn: () => api.agents(),
     refetchInterval: 10_000,
   });
+}
+
+export function AgentActivity() {
+  const agentsQ = useAgents();
   // Backend returns AgentRow shape (name/asset_class/state/...). The Agent type
   // in lib/types is the v2 model (id/strategies/...) — we cast through unknown to
   // bridge until the two shapes converge.
@@ -130,6 +136,100 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between font-mono text-[11px]">
       <span className="text-text-dim">{label}</span>
+      <span className="text-text">{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Compact vertical sidebar variant — same data as AgentActivity but stacked
+ * one-row-per-agent. Designed for the right column of the equity-chart row.
+ *
+ * Always renders the canonical 5-agent skeleton (eq/gold/bonds/crypto/gov);
+ * if the API is empty or partial we still show every slot greyed out so the
+ * operator sees the full topology at a glance.
+ */
+const AGENT_SLOTS: { name: string; asset_class: string }[] = [
+  { name: "equity_agent",     asset_class: "equity" },
+  { name: "gold_agent",       asset_class: "gold" },
+  { name: "silver_agent",     asset_class: "silver" },
+  { name: "bonds_agent",      asset_class: "bonds" },
+  { name: "crypto_agent",     asset_class: "crypto" },
+  { name: "governance_agent", asset_class: "governance" },
+];
+
+const SLOT_LABEL: Record<string, string> = {
+  equity_agent: "EQ",
+  gold_agent: "AU",
+  silver_agent: "AG",
+  bonds_agent: "BD",
+  crypto_agent: "CR",
+  governance_agent: "GV",
+};
+
+export function AgentSidebar() {
+  const agentsQ = useAgents();
+  const live = ((agentsQ.data ?? []) as unknown) as AgentRow[];
+  const byName = new Map(live.map((a) => [a.name, a]));
+
+  return (
+    <section className="flex h-full flex-col rounded-2xl border border-border bg-surface shadow-card-soft">
+      <header className="flex items-center justify-between border-b border-border px-3 py-2">
+        <h2 className="font-mono text-[11px] font-semibold uppercase tracking-wider text-text">
+          agents
+        </h2>
+        <span className="font-mono text-[9px] uppercase tracking-wider text-text-dim">
+          5 · 10s
+        </span>
+      </header>
+      <ul className="flex flex-1 flex-col divide-y divide-border">
+        {AGENT_SLOTS.map((slot) => {
+          const a = byName.get(slot.name);
+          const stateClass = a
+            ? STATE_BADGE[a.state] ?? "border-border bg-bg text-text-dim"
+            : "border-border bg-bg text-text-dim";
+          const heatPct = a ? (a.heat_allocation * 100).toFixed(0) : "—";
+          const coh = a?.coherence == null ? "—" : a.coherence.toFixed(2);
+          const open = a ? a.n_open_positions : 0;
+          const last = a?.last_eval_ts ? fmtRelative(a.last_eval_ts) : "—";
+          return (
+            <li key={slot.name} className="px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-secondary">
+                    {ASSET_ICON[slot.asset_class] ?? "•"}
+                  </span>
+                  <span className="font-mono text-[11px] font-semibold text-text">
+                    {SLOT_LABEL[slot.name] ?? slot.name}
+                  </span>
+                  <span className="truncate font-mono text-[10px] text-text-dim">
+                    {ASSET_LABEL[slot.asset_class] ?? slot.asset_class}
+                  </span>
+                </div>
+                <span
+                  className={`rounded border px-1 py-0 font-mono text-[9px] uppercase tracking-wider ${stateClass}`}
+                >
+                  {a?.state ?? "off"}
+                </span>
+              </div>
+              <div className="mt-1 grid grid-cols-4 gap-1 font-mono text-[10px]">
+                <Stat label="heat" value={a ? `${heatPct}%` : "—"} />
+                <Stat label="coh" value={coh} />
+                <Stat label="open" value={`${open}`} />
+                <Stat label="eval" value={last} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="text-[8px] uppercase tracking-wider text-text-dim">{label}</span>
       <span className="text-text">{value}</span>
     </div>
   );

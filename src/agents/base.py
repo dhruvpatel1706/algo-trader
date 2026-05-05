@@ -29,6 +29,7 @@ class AssetClass(StrEnum):
 
     EQUITY = "equity"
     GOLD = "gold"
+    SILVER = "silver"
     BONDS = "bonds"
     CRYPTO = "crypto"
     GOVERNANCE = "governance"

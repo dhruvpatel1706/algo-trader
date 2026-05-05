@@ -1,7 +1,7 @@
 "use client";
 
-import { CostCounter } from "@/components/CostCounter";
 import { LivePositionsTable } from "@/components/LivePositionsTable";
+import { NewsTickerBar } from "@/components/NewsTickerBar";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
 import dynamic from "next/dynamic";
 
@@ -9,14 +9,14 @@ import dynamic from "next/dynamic";
 // mismatches from Date.now()/relative timestamps/animation-tied state.
 const PnlHero = dynamic(() => import("@/components/PnlHero").then((m) => m.PnlHero), {
   ssr: false,
-  loading: () => <div className="h-40 rounded-2xl border border-border bg-surface" />,
+  loading: () => <div className="h-24 rounded-xl border border-border bg-surface" />,
 });
 
 const EquityChart = dynamic(
   () => import("@/components/EquityChart").then((m) => m.EquityChart),
   {
     ssr: false,
-    loading: () => <div className="h-[388px] rounded-2xl border border-border bg-surface" />,
+    loading: () => <div className="h-[320px] rounded-2xl border border-border bg-surface" />,
   },
 );
 
@@ -44,11 +44,11 @@ const MonteCarloForecast = dynamic(
   },
 );
 
-const AgentActivity = dynamic(
-  () => import("@/components/AgentActivity").then((m) => m.AgentActivity),
+const AgentSidebar = dynamic(
+  () => import("@/components/AgentActivity").then((m) => m.AgentSidebar),
   {
     ssr: false,
-    loading: () => <div className="h-64 rounded-2xl border border-border bg-surface" />,
+    loading: () => <div className="h-[320px] rounded-2xl border border-border bg-surface" />,
   },
 );
 
@@ -64,47 +64,45 @@ const AnalyticsPanel = dynamic(
   () => import("@/components/AnalyticsPanel").then((m) => m.AnalyticsPanel),
   {
     ssr: false,
-    loading: () => <div className="h-80 rounded-2xl border border-border bg-surface" />,
+    loading: () => <div className="h-72 rounded-2xl border border-border bg-surface" />,
   },
 );
 
 export function PortfolioView() {
   return (
-    <div className="mx-auto max-w-[1600px] space-y-5 p-6">
-      <PnlHero />
+    <>
+      <NewsTickerBar />
+      <div className="mx-auto max-w-[1600px] space-y-3 p-4">
+        <PnlHero />
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <EquityChart
-            title="joined equity (by agent · 90d)"
-            stacked
-            drawdown
-            height={320}
-          />
+        {/* Bloomberg-density row: equity 2/4, drawdown+strategies 1/4, agent sidebar 1/4. */}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+          <div className="lg:col-span-2">
+            <EquityChart
+              title="joined equity (by agent · 90d)"
+              stacked
+              drawdown
+              height={320}
+            />
+          </div>
+          <div className="space-y-3">
+            <DrawdownGauge />
+            <StrategiesPanel />
+          </div>
+          <AgentSidebar />
         </div>
-        <div className="space-y-5">
-          <DrawdownGauge />
-          <StrategiesPanel />
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <PnlPredictor />
+          <MonteCarloForecast />
         </div>
+
+        <LiveTradesFeed />
+
+        <AnalyticsPanel />
+
+        <LivePositionsTable />
       </div>
-
-      <AgentActivity />
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <PnlPredictor />
-        <MonteCarloForecast />
-      </div>
-
-      <LiveTradesFeed />
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <AnalyticsPanel />
-        </div>
-        <CostCounter />
-      </div>
-
-      <LivePositionsTable />
-    </div>
+    </>
   );
 }

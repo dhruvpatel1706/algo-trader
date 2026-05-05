@@ -57,7 +57,9 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "bandit" },
     { name = "freezegun" },
+    { name = "hypothesis" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -65,6 +67,7 @@ dev = [
     { name = "pytest-mock" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "vulture" },
 ]
 
 [package.metadata]
@@ -73,11 +76,13 @@ requires-dist = [
     { name = "alpaca-py", specifier = ">=0.33" },
     { name = "apscheduler", specifier = ">=3.10" },
     { name = "asyncpg", specifier = ">=0.30" },
+    { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "fakeredis", specifier = ">=2.24" },
     { name = "fastapi", specifier = ">=0.116" },
     { name = "freezegun", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
@@ -107,6 +112,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
     { name = "vectorbt", specifier = ">=0.26" },
+    { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.13" },
     { name = "websockets", specifier = ">=13.1" },
     { name = "yfinance", specifier = ">=0.2.49" },
 ]
@@ -209,6 +215,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/40/ae/0fc961179e78cc579e138fad6eb580448ecae64908f95b8cb8ee2f241f67/asyncpg-0.31.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:bd5b6efff3c17c3202d4b37189969acf8927438a238c6257f66be3c426beba20", size = 3471858, upload-time = "2025-11-24T23:25:59.636Z" },
     { url = "https://files.pythonhosted.org/packages/52/b2/b20e09670be031afa4cbfabd645caece7f85ec62d69c312239de568e058e/asyncpg-0.31.0-cp312-cp312-win32.whl", hash = "sha256:027eaa61361ec735926566f995d959ade4796f6a49d3bde17e5134b9964f9ba8", size = 527852, upload-time = "2025-11-24T23:26:01.084Z" },
     { url = "https://files.pythonhosted.org/packages/b5/f0/f2ed1de154e15b107dc692262395b3c17fc34eafe2a78fc2115931561730/asyncpg-0.31.0-cp312-cp312-win_amd64.whl", hash = "sha256:72d6bdcbc93d608a1158f17932de2321f68b1a967a13e014998db87a72ed3186", size = 597175, upload-time = "2025-11-24T23:26:02.564Z" },
+]
+
+[[package]]
+name = "bandit"
+version = "1.9.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "stevedore" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/c3/0cb80dfe0f3076e5da7e4c5ad8e57bac6ac357ff4a6406205501cade4965/bandit-1.9.4.tar.gz", hash = "sha256:b589e5de2afe70bd4d53fa0c1da6199f4085af666fde00e8a034f152a52cd628", size = 4242677, upload-time = "2026-02-25T06:44:15.503Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/a4/a26d5b25671d27e03afb5401a0be5899d94ff8fab6a698b1ac5be3ec29ef/bandit-1.9.4-py3-none-any.whl", hash = "sha256:f89ffa663767f5a0585ea075f01020207e966a9c0f2b9ef56a57c7963a3f6f8e", size = 134741, upload-time = "2026-02-25T06:44:13.694Z" },
 ]
 
 [[package]]
@@ -568,6 +589,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517, upload-time = "2024-12-06T15:37:21.509Z" },
+]
+
+[[package]]
+name = "hypothesis"
+version = "6.152.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sortedcontainers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fa/c7/3147bd903d6b18324a016d43a259cf5b4bb4545e1ead6773dc8a0374e70a/hypothesis-6.152.4.tar.gz", hash = "sha256:31c8f9ce619716f543e2710b489b1633c833586641d9e6c94cee03f109a5afc4", size = 466444, upload-time = "2026-04-27T20:18:37.594Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/89/0f50dd0d92e8a7dffc24f69ab910ff81db89b2f082ba42682bd57695e4d2/hypothesis-6.152.4-py3-none-any.whl", hash = "sha256:e730fd93c7578182efadc7f90b3c5437ee4d55edf738930eb5043c81ac1d97e8", size = 532145, upload-time = "2026-04-27T20:18:35.043Z" },
 ]
 
 [[package]]
@@ -1633,6 +1666,15 @@ wheels = [
 ]
 
 [[package]]
+name = "stevedore"
+version = "5.7.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/6d/90764092216fa560f6587f83bb70113a8ba510ba436c6476a2b47359057c/stevedore-5.7.0.tar.gz", hash = "sha256:31dd6fe6b3cbe921e21dcefabc9a5f1cf848cf538a1f27543721b8ca09948aa3", size = 516200, upload-time = "2026-02-20T13:27:06.765Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/06/36d260a695f383345ab5bbc3fd447249594ae2fa8dfd19c533d5ae23f46b/stevedore-5.7.0-py3-none-any.whl", hash = "sha256:fd25efbb32f1abb4c9e502f385f0018632baac11f9ee5d1b70f88cc5e22ad4ed", size = 54483, upload-time = "2026-02-20T13:27:05.561Z" },
+]
+
+[[package]]
 name = "structlog"
 version = "25.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1805,6 +1847,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/11/92/d8f895bf16daac55311b8e218ccd84f6cf3a3e0a10d8b69282494fdff55f/vectorbt-0.28.5.tar.gz", hash = "sha256:79009c1048b80b4744d29abea3198fe8ec06acea66a42ae583745e8ac4c85fe1", size = 498084, upload-time = "2026-03-26T22:18:01.501Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/61/558641336106d99b8437415ddde6dd49c3c2342fccb9df481bedff989266/vectorbt-0.28.5-py3-none-any.whl", hash = "sha256:8820f2d13472947d0207f931ec1b0e041fc797aaf3db8eccd43cacd00663b894", size = 421680, upload-time = "2026-03-26T22:18:00.07Z" },
+]
+
+[[package]]
+name = "vulture"
+version = "2.16"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/3e/4d08c5903b2c0c70cad583c170cc4a663fc6a61e2ad00b711fcda61358cd/vulture-2.16.tar.gz", hash = "sha256:f8d9f6e2af03011664a3c6c240c9765b3f392917d3135fddca6d6a68d359f717", size = 52680, upload-time = "2026-03-25T14:41:27.141Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/be/f935130312330614811dae2ea9df3f395f6d63889eb6c2e68c14507152ee/vulture-2.16-py3-none-any.whl", hash = "sha256:6e0f1c312cef1c87856957e5c2ca9608834a7c794c2180477f30bf0e4cc58eee", size = 26993, upload-time = "2026-03-25T14:41:26.21Z" },
 ]
 
 [[package]]

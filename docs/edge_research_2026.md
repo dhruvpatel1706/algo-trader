@@ -1,5 +1,7 @@
 # Edge research extraction, May 2026
 
+> **See also**: `docs/strategy_catalog.md` for a curated catalog of replicable academic + competition-vetted strategies (with honest "why it might not work for us" sections), `docs/cautionary_tales.md` for famous trading-system blow-ups mapped to our risk caps, and `docs/research_sources.md` for where to scout new strategy candidates beyond what's cataloged.
+
 This note distills the user's YouTube transcripts, the Power of Stocks material, and current public data sources into testable bot work. It is research, not a live-trading permission slip. `docs/policy.md` remains the source of truth: this repo is paper-only until a reviewed policy and broker change lands.
 
 ## Ground truth
