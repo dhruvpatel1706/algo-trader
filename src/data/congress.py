@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from src.net import safe_urlopen
+
 logger = logging.getLogger(__name__)
 
 QUIVER_BASE_URL = "https://api.quiverquant.com/beta/historical/congresstrading"
@@ -65,14 +67,14 @@ def _fetch_url(url: str, api_key: str) -> bytes:
 
     Tests monkeypatch this function to avoid network calls.
     """
-    req = urllib.request.Request(  # noqa: S310 — Quiver https only
+    req = urllib.request.Request(  # noqa: S310 — scheme guarded by safe_urlopen below
         url,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:  # noqa: S310
+    with safe_urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
         return resp.read()
 
 

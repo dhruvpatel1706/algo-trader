@@ -99,3 +99,8 @@ logs/
 pgdata/
 redisdata/
 .codex/
+
+# Rust / Cargo (target is a build artifact; Cargo.lock IS committed for
+# reproducible builds since this crate produces a deployable cdylib).
+crates/target/
+crates/signal-engine/.venv/

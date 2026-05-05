@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import ClassVar
 
+# Module-level mirror of the class-level invariant so static audits can grep
+# every moonshot file for one consistent symbol.
+LIVE_BROKER_BRIDGE: bool = False
+
 
 @dataclass(slots=True)
 class AspirationalAccount:

@@ -21,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import PROJECT_ROOT, get_settings
+from src.net import UnsafeUrlError, safe_urlopen
 
 _CACHE_DIR = PROJECT_ROOT / "data" / "cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -160,8 +161,11 @@ def _to_ms(d: date) -> int:
 def _http_get_json(url: str) -> object | None:
     """GET ``url`` and return parsed JSON, or None on any error (warning emitted)."""
     try:
-        with urllib.request.urlopen(url, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310
+        with safe_urlopen(url, timeout=_HTTP_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except UnsafeUrlError as e:
+        warnings.warn(f"http fetch refused (non-https): {e!r}", stacklevel=3)
+        return None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
         warnings.warn(f"http fetch failed: {url!r}: {e!r}", stacklevel=3)
         return None

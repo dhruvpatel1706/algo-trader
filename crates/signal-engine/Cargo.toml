@@ -22,9 +22,4 @@ ndarray = { workspace = true }
 # Default = Python extension. Disable when used from another Rust crate.
 default = ["python"]
 python = []
-
-[profile.release]
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-opt-level = 3
+# Release-profile flags live at the workspace root in `crates/Cargo.toml`.

@@ -64,3 +64,35 @@ def test_writer_creates_dir_if_missing(tmp_path):
     p = w.write({"event": "x"})
     assert p.parent == target
     assert p.exists()
+
+
+def test_redact_account_id_under_account_key():
+    """Broker account identifiers are sensitive — strip when keyed as such."""
+    out = redact({"account_id": "PA12ABC34DEF56GHI78JKL90M"})
+    assert out["account_id"] == "***REDACTED***"
+
+
+def test_redact_account_number_alias():
+    out = redact({"account_number": "PA1234567890ABCDEFGHIJKLM"})
+    assert out["account_number"] == "***REDACTED***"
+
+
+def test_redact_webhook_url_value():
+    """Discord webhook URLs are themselves secrets — anyone with the URL can post."""
+    webhook = "https://discord.com/api/webhooks/123456/abcDEFghi-_LongTokenValueHere"
+    out = redact({"webhook_url": webhook})
+    assert out["webhook_url"] == "***REDACTED***"
+
+
+def test_redact_webhook_in_message_body():
+    """Even if webhook URL appears inside an unrelated string field, scrub it."""
+    msg = "Sent alert via https://discord.com/api/webhooks/999/xyzTOKEN at 12:34"
+    out = redact({"event": "alert", "message": msg})
+    assert "discord.com/api/webhooks" not in out["message"]
+    assert "REDACTED_WEBHOOK" in out["message"]
+
+
+def test_redact_short_value_under_secret_label_still_kept():
+    """Don't over-redact: a short non-credential string is fine."""
+    out = redact({"secret_label": "personal"})
+    assert out["secret_label"] == "personal"

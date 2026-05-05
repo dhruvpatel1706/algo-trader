@@ -13,3 +13,13 @@ publish = false
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py312"] }
 numpy = "0.22"
 ndarray = "0.16"
+
+# Release profile lives at the workspace root because Cargo only honors
+# `[profile.*]` from the workspace manifest; per-crate profiles are silently
+# ignored with a warning. LTO + single codegen unit + abort-on-panic gives the
+# best release codegen for our hot indicator math.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = 3

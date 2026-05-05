@@ -62,6 +62,14 @@ class PaperBroker:
         s = get_settings()
         if not s.ALPACA_PAPER_TRADE:
             raise RuntimeError("PaperBroker requires ALPACA_PAPER_TRADE=True")
+        if s.LIVE_TRADING == "1":
+            # Defense in depth: even though the alpaca client is constructed
+            # with paper=True below, refusing here keeps the env-level kill
+            # switch consistent with `scripts/place_order.py` and the
+            # `dashboard/api/kill.py` guard.
+            raise RuntimeError(
+                "PaperBroker refuses to construct with LIVE_TRADING=1; v1 is paper-only"
+            )
 
         if client is not None:
             self._client = client

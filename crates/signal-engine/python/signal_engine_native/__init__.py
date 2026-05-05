@@ -33,4 +33,4 @@ except ImportError as e:
 
     sma = ema = atr = williams_vix_fix = _missing  # type: ignore[assignment]
 
-__all__ = ["sma", "ema", "atr", "williams_vix_fix", "HAVE_NATIVE"]
+__all__ = ["HAVE_NATIVE", "atr", "ema", "sma", "williams_vix_fix"]

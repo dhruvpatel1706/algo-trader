@@ -18,6 +18,9 @@ import pandas as pd
 from src.moonshot.rl.agent import LinearQAgent
 from src.moonshot.rl.env import TradingEnv, TradingEnvConfig
 
+# Moonshot lane invariant: training never executes against a real broker.
+LIVE_BROKER_BRIDGE: bool = False
+
 
 @dataclass(frozen=True, slots=True)
 class RlTrainResult:

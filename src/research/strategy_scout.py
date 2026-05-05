@@ -40,6 +40,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from src.net import safe_urlopen
+
 logger = logging.getLogger(__name__)
 
 # -- Constants --------------------------------------------------------------------------
@@ -332,9 +334,9 @@ def _http_get_json(url: str, headers: dict[str, str]) -> dict[str, Any] | list[A
 
     Tests monkeypatch this single seam to avoid real network calls.
     """
-    req = urllib.request.Request(url, headers=headers)  # noqa: S310 — https only seam
+    req = urllib.request.Request(url, headers=headers)  # noqa: S310 — scheme guarded by safe_urlopen below
     try:
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SEC) as resp:  # noqa: S310 — https only
+        with safe_urlopen(req, timeout=_HTTP_TIMEOUT_SEC) as resp:
             raw = resp.read()
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
         return None

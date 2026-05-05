@@ -204,11 +204,31 @@ class _PatternVisitor(ast.NodeVisitor):
         self._decimal_names: set[str] = set()
         # Global-mutable assigns: track module-level Name assigns.
         self._at_module_level = True
-        # Cache: did this test file mention `monkeypatch` / `respx` / `httpx_mock`?
+        # Names imported from the stdlib `datetime` module — used to disambiguate
+        # `utcnow()` (real, deprecated) from a local helper of the same name.
+        self._datetime_imports: set[str] = set()
+        # Cache: does this test file mock the network? Recognize the standard
+        # mocking surfaces — ``monkeypatch`` / ``respx`` / ``httpx_mock`` /
+        # ``mocker`` (pytest-mock) AND ``unittest.mock`` (``patch`` / ``Mock``).
+        joined_source = "\n".join(source_lines)
         self._has_monkeypatch = any(
-            tok in "\n".join(source_lines)
-            for tok in ("monkeypatch", "respx", "httpx_mock", "MockerFixture", "mocker")
+            tok in joined_source
+            for tok in (
+                "monkeypatch",
+                "respx",
+                "httpx_mock",
+                "MockerFixture",
+                "mocker",
+                "unittest.mock",
+                "from unittest import mock",
+            )
         )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "datetime":
+            for alias in node.names:
+                self._datetime_imports.add(alias.asname or alias.name)
+        self.generic_visit(node)
 
     # -- helpers ----------------------------------------------------------
 
@@ -325,8 +345,13 @@ class _PatternVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         qn = _qualified_attr(node.func)
-        # datetime.utcnow() — always tz-naive and deprecated.
-        if qn.endswith("datetime.utcnow") or qn == "utcnow":
+        # datetime.utcnow() — always tz-naive and deprecated. Bare `utcnow()`
+        # is only a real hit when imported from the stdlib `datetime` module;
+        # otherwise it's a local helper (we have one in src/execution/orders.py
+        # that returns datetime.now(UTC) — calling that is correct).
+        if qn.endswith("datetime.utcnow") or (
+            qn == "utcnow" and "utcnow" in self._datetime_imports
+        ):
             self._add("timezone_naive_datetime", node.lineno, "datetime.utcnow() is tz-naive")
         # datetime.now() with no args — tz-naive.
         elif qn.endswith("datetime.now") or qn == "now":
@@ -347,12 +372,12 @@ class _PatternVisitor(ast.NodeVisitor):
     def _looks_like_datetime_now(self, node: ast.Call) -> bool:
         """Filter out `mock.now()`, `time.now()` etc. — only flag if the receiver
         looks plausibly datetime-y. Conservative: trigger if receiver contains
-        'datetime' or if it's an unqualified `now()` (rare but worth flagging)."""
+        'datetime' or if `now` was imported from `datetime` directly."""
         if isinstance(node.func, ast.Attribute):
             qn = _qualified_attr(node.func)
             return "datetime" in qn or "Datetime" in qn
         if isinstance(node.func, ast.Name) and node.func.id in {"now", "utcnow"}:
-            return True
+            return node.func.id in self._datetime_imports
         return False
 
     # -- look_ahead_iloc_minus_1 -----------------------------------------

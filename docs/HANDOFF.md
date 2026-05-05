@@ -561,3 +561,69 @@ Codex's verdict was correct: even with 542 green tests, this is *not* ready for 
 7. **WebSocket fan-out**: backend emits events, frontend has the hook (`useSignalStream` in `dashboard/web/lib/ws.ts`), but the runner doesn't yet publish to the Redis channel that the WS proxies. ~50 lines of glue.
 8. **Rust hot-path wiring**: `crates/signal-engine/` is scaffolded with PyO3 bindings, byte-for-byte parity tests, and an opt-in switch (`ALGOTRADER_NATIVE_INDICATORS=1`). Build only when profiling shows indicator code as a real bottleneck — broker RTT dominates by ~20× per `docs/performance.md`.
 9. **Worktree is dirty**: this stabilization commit is the checkpoint. Future work should base off it.
+
+## Round 3: production-readiness pass (2026-05-05)
+
+Goal stated by operator: "rebase or merge, then review the entire code, check everything that we did for rust as well, make sure it's production ready." Auto-mode session. Outcome: `feature/next-level` fast-forward-merged into `main`, then a security + invariant audit + Rust verification pass landed on top.
+
+### Merge
+
+`feature/next-level` was 1 commit ahead of `main` (`73817b0`); main was 1 ahead of `origin/main` (`4dac00f`). Linear history, fast-forward merge, branch deleted. Local main is now at `73817b0` plus the round-3 commit. **Not pushed to origin yet — operator decision.**
+
+### Security findings landed (all triaged)
+
+| Finding | Resolution |
+|---|---|
+| `xml.etree` XXE in SEC EDGAR Form 4 parsing (`src/data/sec_insider.py`) | Switched to `defusedxml` (added to deps). The stdlib path remains imported only for `Element` / `ParseError` types. |
+| Pickle RCE on model load (`src/ml/predict.py`) | Added SHA256 sidecar verification: `save_model` writes `<file>.pkl.sha256` next to the pickle, `load_model` requires the sidecar and verifies digest before unpickling. New `ModelIntegrityError`. |
+| `urlopen` with no scheme guard (5 sites) | Created `src/net/safe_http.py` with an https-only wrapper used by every caller (`congress.py`, `crypto_wallets.py`, `funding.py`, `loader.py`, `sec_insider.py`, `strategy_scout.py`, `discord_alert.py`). Refuses `file://`, `ftp://`, plain `http://` (except localhost). Tests: `tests/unit/net/test_safe_http.py`. |
+| Bug Hunter false positive on local `utcnow()` | Detector now tracks `datetime` imports per-file and only flags bare `utcnow()` when it was imported from `datetime`. Regression test added. |
+| Bug Hunter false positive on `unittest.mock` tests | Detector now recognizes `unittest.mock` and `from unittest import mock` as a network-mocking surface (alongside `monkeypatch` / `respx` / `httpx_mock` / `mocker`). |
+
+### Audit findings landed (production hardening)
+
+| Finding | Resolution |
+|---|---|
+| `scripts/place_order.py` constructed `ApprovalToken` directly, bypassing the `approval_token()` factory | Now goes through `approval_token()`, which re-validates both gates and raises on any bypass attempt. |
+| `place_order.py` submitted to Alpaca BEFORE writing the journal record (race window on crash) | Now writes a `submit_intent` record (with fsync via `JournalWriter`) BEFORE the broker call, then `submit_ack` after. |
+| `_latest_approvals` accepted any APPROVE in last 200 lines — no cycle-id binding, no freshness | Now requires `cycle_id` match AND timestamp within `--approval-max-age-sec` (default 300s). Two new integration tests for stale + wrong-cycle rejection. |
+| Journal redaction missed `account_id` / `account_number` / webhook URLs | `_ALWAYS_SECRET_KEY` regex covers them now; webhook URLs are stripped from any string value. New tests pin the contract. |
+| Moonshot RL submodules (`agent.py`, `env.py`, `train.py`, `evaluate.py`, `rl/__init__.py`) didn't declare `LIVE_BROKER_BRIDGE = False` at module scope | All five now declare it. New `tests/unit/moonshot/test_bridge_invariant.py` walks the whole `src.moonshot` package recursively and asserts every module declares it as `False`. |
+| `dashboard/api/kill.py:execute_kill` reached broker mutations with no journal record and no `LIVE_TRADING` re-check | Writes `kill_intent` BEFORE broker calls and `kill_complete` after. Refuses to run if `LIVE_TRADING=1`. Two new tests. |
+| `PaperBroker.__init__` didn't refuse construction when `LIVE_TRADING=1` | Defense-in-depth check added — even though the alpaca client is hard-coded `paper=True`, refusing here keeps the env-level kill switch consistent. |
+| `tests/integration/test_paper_smoke.py` previously documented as broken (place_order resolved REPO via symlink → real journal) | `place_order.py` now takes `--repo-root`. Test runs against an isolated journal and verifies the dry-run record actually lands there. |
+
+### Rust scaffold verified
+
+Rust toolchain installed locally via rustup (`stable-aarch64-apple-darwin 1.95.0`, minimal profile, no shell modification). Maturin installed via `uv pip install maturin`.
+
+| Check | Result |
+|---|---|
+| `cargo build --no-default-features` | clean |
+| `cargo test --no-default-features --lib` | 4/4 unit tests pass (`sma_window_aligns_with_pandas`, `ema_seed_is_sma_then_recurrence`, `williams_vix_fix_is_zero_at_new_high`, `atr_does_not_panic_on_short_series`) |
+| `cargo clippy --all-targets -- -D warnings` | clean (after fixing one `clippy::needless-range-loop` in ATR seed) |
+| `maturin develop --release` (from repo venv) | builds wheel, installs as editable, `signal_engine_native.HAVE_NATIVE` is `True` |
+| Python ↔ Rust parity test | `tests/unit/signals/test_native_parity.py` — 13 cases (SMA/EMA/ATR/WVF across multiple periods + facade env-var switch). All pass within `rtol=1e-9, atol=1e-12`. Skipped automatically when extension isn't built. |
+
+The release `[profile]` block was moved from `crates/signal-engine/Cargo.toml` (where Cargo silently ignores it on a non-root package) to `crates/Cargo.toml` (workspace root). `crates/Cargo.lock` is committed; `crates/target/` and `crates/signal-engine/.venv/` are gitignored.
+
+### Final gate check (round 3)
+
+| Gate | Result |
+|---|---|
+| `uv run ruff check .` | all checks passed |
+| `uv run pytest -q` (unit + integration) | **834 passed**, 2 deprecation warnings |
+| `uv run pytest -q -m property` | **65 passed** |
+| `cd dashboard/web && pnpm build` | 9/9 routes prerender clean |
+| `cargo test --no-default-features --lib` (signal-engine) | 4 passed |
+| `cargo clippy --all-targets -- -D warnings` (signal-engine) | clean |
+| `uv run python scripts/bug_hunt.py` | 0 critical, 0 high, 89 medium (all type-hint cleanup), 15 low |
+
+### What's still open after round 3
+
+The same six strategy-side blockers from round 2 remain (`failed_breakout` PF, `ma_pullback_trend` DD, crypto strategy classes, WebSocket runner publish, slippage A/B, coherence dataset). Round 3 was about hardening the spine, not changing the alpha. Specific carry-overs:
+
+1. **Push `main` to `origin`** — operator decision; not done in this session.
+2. **Strategy composition** to push `failed_breakout` over PF 1.2 (compose with `gap_levels_filter` + `news_filter`) and bring `ma_pullback_trend` DD under 20% (apply `macro_regime_filter` to dampen longs in `risk_off` regimes).
+3. **Live external integration smoke** — SEC EDGAR, Quiver, Nansen, Finnhub, Anthropic, Discord paths are unit-mocked but never exercised live.
+4. **Mypy cleanup** — 89 medium findings are mostly `mypy:type-arg` (missing generics) and `mypy:no-any-return`. Quality signals; address as code is touched, not as a sweep.

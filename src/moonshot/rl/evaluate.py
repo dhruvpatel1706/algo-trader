@@ -17,6 +17,10 @@ import pandas as pd
 from src.moonshot.rl.agent import LinearQAgent
 from src.moonshot.rl.env import TradingEnv, TradingEnvConfig
 
+# Moonshot lane invariant: evaluation runs in-process against TradingEnv, never
+# against a real broker.
+LIVE_BROKER_BRIDGE: bool = False
+
 
 def _sharpe(rs: np.ndarray) -> float:
     rs = rs[np.isfinite(rs)]

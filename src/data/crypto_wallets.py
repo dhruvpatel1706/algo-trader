@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+from src.net import safe_urlopen
+
 logger = logging.getLogger(__name__)
 
 NANSEN_BASE_URL = "https://api.nansen.ai/api/beta/smart-money"
@@ -73,14 +75,14 @@ def _fetch_url(url: str, api_key: str) -> bytes:
 
     Tests monkeypatch this function to avoid network calls.
     """
-    req = urllib.request.Request(  # noqa: S310 — Nansen https only
+    req = urllib.request.Request(  # noqa: S310 — scheme guarded by safe_urlopen below
         url,
         headers={
             "apiKey": api_key,
             "Accept": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:  # noqa: S310
+    with safe_urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
         return resp.read()
 
 

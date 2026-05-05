@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 import pandas as pd
 import pytest
-from src.ml.predict import load_model, predict_score, save_model
+from src.ml.predict import (
+    ModelIntegrityError,
+    load_model,
+    predict_score,
+    save_model,
+)
 from src.ml.train import train_model
 
 
@@ -60,10 +67,47 @@ def test_predict_score_handles_reordered_columns(trained_model):
 
 
 def test_load_model_rejects_wrong_type(tmp_path):
+    """An on-disk pickle that round-trips integrity but isn't an LGBMClassifier
+    must raise TypeError."""
     import pickle
 
     path = tmp_path / "bogus.pkl"
     with path.open("wb") as fh:
         pickle.dump({"not": "a model"}, fh)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    path.with_name(path.name + ".sha256").write_text(digest + "\n", encoding="utf-8")
     with pytest.raises(TypeError):
         load_model(path)
+
+
+def test_load_model_requires_sidecar(tmp_path, trained_model):
+    """Refuse to unpickle if the .sha256 sidecar is missing — anyone with
+    write access to the model dir could otherwise swap in a malicious pickle."""
+    result, _ = trained_model
+    path = tmp_path / "overlay.pkl"
+    save_model(result.model, path)
+    sidecar = path.with_name(path.name + ".sha256")
+    sidecar.unlink()
+    with pytest.raises(ModelIntegrityError, match="missing sha256 sidecar"):
+        load_model(path)
+
+
+def test_load_model_rejects_hash_mismatch(tmp_path, trained_model):
+    """Sidecar hash must match the file. Tampering with either side fails."""
+    result, _ = trained_model
+    path = tmp_path / "overlay.pkl"
+    save_model(result.model, path)
+    sidecar = path.with_name(path.name + ".sha256")
+    sidecar.write_text("0" * 64 + "\n", encoding="utf-8")
+    with pytest.raises(ModelIntegrityError, match="sha256 mismatch"):
+        load_model(path)
+
+
+def test_save_model_writes_sidecar(tmp_path, trained_model):
+    result, _ = trained_model
+    path = tmp_path / "overlay.pkl"
+    save_model(result.model, path)
+    sidecar = path.with_name(path.name + ".sha256")
+    assert sidecar.exists()
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert sidecar.read_text(encoding="utf-8").strip() == expected

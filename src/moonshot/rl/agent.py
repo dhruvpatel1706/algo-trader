@@ -20,6 +20,11 @@ from pathlib import Path
 
 import numpy as np
 
+# Moonshot lane invariant: this module MUST NOT reach a real broker. Static
+# audits grep for `LIVE_BROKER_BRIDGE` in `src/moonshot/**`; missing it
+# signals a contributor accidentally wired moonshot logic into the trade path.
+LIVE_BROKER_BRIDGE: bool = False
+
 
 class LinearQAgent:
     """Linear function-approximator Q-agent.

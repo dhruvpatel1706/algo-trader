@@ -147,6 +147,34 @@ def test_pattern_datetime_utcnow_fires(bh, tmp_path):
     assert any(f.pattern == "timezone_naive_datetime" for f in findings)
 
 
+def test_pattern_local_utcnow_helper_does_not_fire(bh, tmp_path):
+    """Bare `utcnow()` is only a real hit when imported from `datetime`.
+
+    `src/execution/orders.py` defines a local `utcnow()` that returns
+    `datetime.now(UTC)` — calls to it are correct and must not be flagged.
+    """
+    repo = _make_synthetic_repo(
+        tmp_path,
+        {
+            "src/execution/orders.py": (
+                "from datetime import UTC, datetime\n"
+                "def utcnow():\n"
+                "    return datetime.now(UTC)\n"
+            ),
+            "src/execution/broker.py": (
+                "from src.execution.orders import utcnow\n"
+                "def stamp():\n"
+                "    return utcnow()\n"
+            ),
+        },
+    )
+    findings = bh.run_pattern_scan(repo)
+    assert not any(
+        f.pattern == "timezone_naive_datetime" and f.file == "src/execution/broker.py"
+        for f in findings
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pattern: decimal_float_compare
 # ---------------------------------------------------------------------------

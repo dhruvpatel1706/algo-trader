@@ -28,6 +28,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from src.net import UnsafeUrlError, safe_urlopen
+
 # Discord enforces a 2000-character limit on message ``content``.
 _DISCORD_MAX_CONTENT = 2000
 _HTTP_TIMEOUT_SEC = 3.0
@@ -81,17 +83,17 @@ class DiscordWebhookHandler(logging.Handler):
         truncated = message[:_DISCORD_MAX_CONTENT]
         payload: dict[str, Any] = {"content": truncated}
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(  # noqa: S310 — Discord webhook URL is operator-supplied https
+        req = urllib.request.Request(  # noqa: S310 — scheme guarded by safe_urlopen below
             self._webhook,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SEC) as resp:  # noqa: S310
+            with safe_urlopen(req, timeout=_HTTP_TIMEOUT_SEC) as resp:
                 # Drain a tiny bit so the connection can be cleanly closed.
                 resp.read(1)
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except (urllib.error.URLError, TimeoutError, OSError, UnsafeUrlError):
             # Swallow network errors — alerting is best-effort.
             pass
 

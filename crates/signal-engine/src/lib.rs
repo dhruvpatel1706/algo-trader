@@ -88,10 +88,7 @@ pub fn atr_native(
         tr[i] = a.max(b).max(c);
     }
     // Initial ATR = simple mean of first `period` TR.
-    let mut acc: f64 = 0.0;
-    for i in 0..period {
-        acc += tr[i];
-    }
+    let acc: f64 = tr.iter().take(period).sum();
     let mut atr = acc / period as f64;
     out[period - 1] = atr;
     let p = period as f64;

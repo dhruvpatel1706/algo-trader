@@ -9,8 +9,10 @@ filing became public), never ``txn_date`` (the underlying trade date).
 
 Notes:
     * EDGAR rate limit is 10 req/sec and a descriptive ``User-Agent`` header
-      is required. We use ``urllib`` + stdlib XML parsing to keep the
-      dependency surface minimal.
+      is required. Network calls go through ``src.net.safe_urlopen`` which
+      enforces an https-only scheme guard.
+    * XML is parsed with ``defusedxml`` to harden against XXE / billion-laughs
+      attacks if a malicious filing or MITM ever reaches us.
     * Every parse error is caught and logged - one malformed filing must
       never crash the caller. We skip and continue.
     * Tests must NOT hit the network; use the on-disk fixture loaders or
@@ -23,10 +25,17 @@ import logging
 import os
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
+from xml.etree.ElementTree import (  # nosec B405 — read-only; parsing via defusedxml
+    Element,
+    ParseError,
+)
+
+from defusedxml import ElementTree as DefusedET
+
+from src.net import safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +82,10 @@ def _fetch_url(url: str, user_agent: str) -> bytes:
 
     Tests monkeypatch this function to avoid network calls.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent})  # noqa: S310 — SEC EDGAR https only
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 — https URL
+    req = urllib.request.Request(  # noqa: S310 — scheme guarded by safe_urlopen below
+        url, headers={"User-Agent": user_agent}
+    )
+    with safe_urlopen(req, timeout=30) as resp:
         return resp.read()
 
 
@@ -83,14 +94,14 @@ def _fetch_url(url: str, user_agent: str) -> bytes:
 # ----------------------------------------------------------------------------
 
 
-def _text(elem: ET.Element | None) -> str:
+def _text(elem: Element | None) -> str:
     """Strip + None-safe text getter."""
     if elem is None or elem.text is None:
         return ""
     return elem.text.strip()
 
 
-def _value(parent: ET.Element | None, tag: str) -> str:
+def _value(parent: Element | None, tag: str) -> str:
     """Many Form 4 fields use ``<field><value>X</value></field>``.
 
     Some legacy filings put the text directly on ``<field>`` instead.
@@ -107,7 +118,7 @@ def _value(parent: ET.Element | None, tag: str) -> str:
     return _text(child)
 
 
-def _parse_role(reporting_owner: ET.Element | None) -> str:
+def _parse_role(reporting_owner: Element | None) -> str:
     """Build a human-readable role string from ``reportingOwnerRelationship``."""
     if reporting_owner is None:
         return ""
@@ -163,8 +174,12 @@ def parse_form4_xml(xml_bytes: bytes, filing_date: date) -> list[InsiderTransact
     raise, because a single malformed filing shouldn't break a batch.
     """
     try:
-        root = ET.fromstring(xml_bytes)  # noqa: S314 - SEC content, XML only
-    except ET.ParseError as exc:
+        # defusedxml hardens against XXE / billion-laughs / external-entity
+        # attacks. SEC EDGAR doesn't include external entities, but we don't
+        # want a malicious filing (or a man-in-the-middle that pretends to be
+        # EDGAR) to be able to exfiltrate or DoS us through XML.
+        root = DefusedET.fromstring(xml_bytes)
+    except ParseError as exc:
         logger.warning("Form 4 XML parse failed: %s", exc)
         return []
 
@@ -255,8 +270,8 @@ def _parse_atom_entries(atom_bytes: bytes) -> list[tuple[str, date]]:
     """Return ``(filing_url, filing_date)`` tuples from EDGAR's atom feed."""
     out: list[tuple[str, date]] = []
     try:
-        root = ET.fromstring(atom_bytes)  # noqa: S314
-    except ET.ParseError as exc:
+        root = DefusedET.fromstring(atom_bytes)
+    except ParseError as exc:
         logger.warning("EDGAR atom parse failed: %s", exc)
         return out
 

@@ -14,12 +14,13 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.parse
-import urllib.request
 import warnings
 from datetime import UTC, date, datetime
 from typing import Literal
 
 import pandas as pd
+
+from src.net import UnsafeUrlError, safe_urlopen
 
 _BINANCE_FUNDING_URL = "https://fapi.binance.com/fapi/v1/fundingRate"
 _REQUEST_TIMEOUT = 10  # seconds
@@ -64,8 +65,14 @@ def fetch_funding_rate(symbol: str, start: date, end: date) -> pd.DataFrame:
     }
     url = f"{_BINANCE_FUNDING_URL}?{urllib.parse.urlencode(params)}"
     try:
-        with urllib.request.urlopen(url, timeout=_REQUEST_TIMEOUT) as resp:  # noqa: S310
+        with safe_urlopen(url, timeout=_REQUEST_TIMEOUT) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
+    except UnsafeUrlError as e:
+        warnings.warn(
+            f"funding rate fetch refused (non-https) for {sym}: {e!r}",
+            stacklevel=2,
+        )
+        return _empty_funding_frame()
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
         warnings.warn(
             f"funding rate fetch failed for {sym}: {e!r}; returning empty frame",
@@ -138,7 +145,9 @@ def funding_filter_score(
     if rates.empty:
         return 1.0
 
-    current = float(rates.iloc[-1])
+    # `history` was filtered to `index <= asof_ts` above, so iloc[-1] is the
+    # most recent observation as-of the asof timestamp — no look-ahead.
+    current = float(rates.iloc[-1])  # noqa: bug-hunt:look_ahead_iloc_minus_1
     p25, p75 = float(rates.quantile(0.25)), float(rates.quantile(0.75))
     p_min, p_max = float(rates.min()), float(rates.max())
 

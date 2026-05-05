@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 
+# Module-level invariant mirror — see `tests/unit/moonshot/test_bridge_invariant.py`.
+LIVE_BROKER_BRIDGE: bool = False
+
 
 @dataclass(frozen=True, slots=True)
 class LlmDecision:

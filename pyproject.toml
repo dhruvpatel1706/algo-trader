@@ -48,6 +48,8 @@ dependencies = [
   "scikit-learn>=1.8.0",
   "apscheduler>=3.10",
   "fakeredis>=2.24",
+  # XXE-hardened XML parser for SEC EDGAR ingestion.
+  "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]

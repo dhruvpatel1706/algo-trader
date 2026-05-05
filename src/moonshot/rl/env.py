@@ -26,6 +26,9 @@ except ImportError:  # pragma: no cover - exercised only without gymnasium
     _HAS_GYM = False
 
 
+# Moonshot lane invariant: never bridges to a live broker. See module docstring.
+LIVE_BROKER_BRIDGE: bool = False
+
 # Discrete action space: index -> position sign.
 ACTION_FLAT = 0
 ACTION_LONG = 1
