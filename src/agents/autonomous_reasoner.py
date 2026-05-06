@@ -156,11 +156,28 @@ class AutonomousReasoner:
     its own confidence by the result. No human in the loop on a per-trade
     basis — the human-in-the-loop control is the Start/Stop button +
     promotion gates + risk caps, not per-signal approval.
+
+    Optional episodic-memory recall:
+        When ``memory_store`` and ``embedding_provider`` are both supplied,
+        the reasoner queries the trade-memory store for the top-k most
+        similar past trades before each LLM call and includes the
+        resulting lesson lines in the user prompt under
+        ``recalled_memories``. This lets the LLM learn from prior wins
+        and losses on analogous setups. Recall failure is logged and
+        skipped (never blocks the decision); when memory is not
+        configured, behavior is byte-identical to a memory-less reasoner.
     """
 
     model_max_tokens: int = 200
     enabled: bool = True
     journal_writer: Any = None  # `JournalWriter | None`; injected at construction
+    # Episodic memory: when both are set, recall similar past trades and
+    # include them in the LLM prompt. Defaulting to None preserves the
+    # legacy behavior so existing callers (and tests) need no changes.
+    memory_store: Any = None         # `MemoryStore | None`
+    embedding_provider: Any = None   # `EmbeddingProvider | None`
+    recall_k: int = 3
+    recall_min_similarity: float = 0.5
 
     def evaluate(self, ctx: SignalContext) -> SignalJudgment:
         """Run the LLM judgment. Returns a clamped, journaled SignalJudgment.
@@ -177,7 +194,56 @@ class AutonomousReasoner:
 
         try:
             anon_ctx, aliases = _anonymize_context(ctx)
-            user_prompt = _build_user_prompt(anon_ctx)
+
+            # Episodic recall (best-effort). The memory store holds REAL
+            # tickers, so we anchor the search on the un-anonymized ctx;
+            # then we anonymize the resulting lines using the same alias
+            # map before they reach the LLM.
+            recalled_lines: list[str] = []
+            if self.memory_store is not None and self.embedding_provider is not None:
+                try:
+                    from src.memory.recall_for_signal import (
+                        format_recalled_memories_for_prompt,
+                        recall_for_signal_context,
+                    )
+
+                    memories = recall_for_signal_context(
+                        ctx,
+                        store=self.memory_store,
+                        provider=self.embedding_provider,
+                        k=self.recall_k,
+                        min_similarity=self.recall_min_similarity,
+                    )
+                    raw_lines = format_recalled_memories_for_prompt(memories)
+                    # Anonymize ticker symbols inside recalled lines using
+                    # the same alias map that was applied to the context,
+                    # extending the map for any new tickers we hadn't seen.
+                    counter = len(aliases)
+                    anonymized: list[str] = []
+                    for line in raw_lines:
+                        out_line = line
+                        # First pass: replace any ticker we already have
+                        # an alias for.
+                        for placeholder, original in aliases.items():
+                            out_line = out_line.replace(original, placeholder)
+                        # Second pass: bare symbols at the start of the
+                        # line that we haven't seen yet need new aliases.
+                        # We split on the first space and check the head.
+                        head = out_line.split(" ", 1)[0]
+                        if head and not head.startswith("[ASSET_"):
+                            new_ph = f"[ASSET_{counter}]"
+                            counter += 1
+                            aliases[new_ph] = head
+                            out_line = out_line.replace(head, new_ph)
+                        anonymized.append(out_line)
+                    recalled_lines = anonymized
+                except Exception as e:
+                    logger.warning(
+                        "autonomous_reasoner: memory recall failed (continuing): %s", e
+                    )
+                    recalled_lines = []
+
+            user_prompt = _build_user_prompt(anon_ctx, recalled_memories=recalled_lines)
 
             try:
                 resp = call_llm(
@@ -304,9 +370,24 @@ def _anonymize_context(ctx: SignalContext) -> tuple[SignalContext, dict[str, str
     )
 
 
-def _build_user_prompt(ctx: SignalContext) -> str:
-    """Render the context as deterministic JSON. Stable shape -> stable
-    prompts -> better LLM behavior across providers."""
+def _build_user_prompt(
+    ctx: SignalContext,
+    *,
+    recalled_memories: list[str] | None = None,
+) -> str:
+    """Render the context as deterministic JSON.
+
+    Stable shape -> stable prompts -> better LLM behavior across providers.
+
+    Args:
+        ctx: Anonymized signal context.
+        recalled_memories: Optional list of formatted lesson lines from
+            episodic memory. Each line should already be anonymized
+            (symbols replaced with ``[ASSET_<n>]`` placeholders) by the
+            caller. Empty/None becomes ``"recalled_memories": []`` in
+            the prompt; the LLM sees it as additional context and may
+            use it (or not) at its judgment.
+    """
     # Auto-resolve the microstructure phase if the caller didn't pass one.
     # Keeping this lazy means SignalContext can stay a frozen dataclass and
     # callers don't need to compute the phase themselves.
@@ -332,6 +413,7 @@ def _build_user_prompt(ctx: SignalContext) -> str:
             "phase": phase,
             "posture": phase_posture(phase),
         },
+        "recalled_memories": recalled_memories or [],
     }
     return json.dumps(payload, default=str)
 
