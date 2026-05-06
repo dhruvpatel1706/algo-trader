@@ -65,6 +65,8 @@ live/runtime/
 live/journal/
 live/watchdog/
 live/memory.db
+live/memory.db-shm
+live/memory.db-wal
 live/memory.db-journal
 live/models/
 

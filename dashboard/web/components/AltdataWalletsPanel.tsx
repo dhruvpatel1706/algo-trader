@@ -2,7 +2,8 @@
 import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
-function fmtUsd(n: number) {
+function fmtUsd(n: number | null | undefined) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return n.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,

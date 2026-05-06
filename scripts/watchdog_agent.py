@@ -67,7 +67,9 @@ from src.config import PROJECT_ROOT
 log = logging.getLogger("algo_trader.watchdog_agent")
 
 _DEFAULT_API_BASE = os.environ.get("DASHBOARD_API_BASE", "http://localhost:8000")
-_JOURNAL_DIR = PROJECT_ROOT / "live" / "journal"
+# Canonical journal location matches dashboard/api/journal_reader.py and
+# scripts/run_bot.py — see run_bot.build_runner for the rationale.
+_JOURNAL_DIR = PROJECT_ROOT / "journal"
 _RUNNER_LOG = PROJECT_ROOT / "live" / "runtime" / "runner.log"
 _WATCHDOG_DIR = PROJECT_ROOT / "live" / "watchdog"
 

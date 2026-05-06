@@ -205,7 +205,14 @@ def build_runner() -> tuple[Runner, JournalWriter, dict[str, Any]]:
     redis_url = os.environ.get("REDIS_URL")
     runner = Runner(redis_url=redis_url)
 
-    journal_dir = Path(os.environ.get("JOURNAL_DIR") or (PROJECT_ROOT / "live" / "journal"))
+    # The repo-wide convention is ``<repo>/journal/``. ``dashboard/api/kill.py``,
+    # ``dashboard/api/journal_reader.py``, ``scripts/place_order.py`` and
+    # ``scripts/smoke_paper.py`` all read/write here. An earlier default of
+    # ``live/journal/`` split the runner's writes from the dashboard's reader
+    # — orders submitted by the live pipeline appeared in the journal but
+    # never reached the UI's ``/api/trades`` endpoint. Override via env if
+    # operating multiple runners against different journal stores.
+    journal_dir = Path(os.environ.get("JOURNAL_DIR") or (PROJECT_ROOT / "journal"))
     journal_writer = JournalWriter(journal_dir)
 
     # Best-effort construction of every live-pipeline component. Each

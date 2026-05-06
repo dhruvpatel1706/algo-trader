@@ -55,9 +55,28 @@ def read_events(
 
 
 def read_trades(*, start: date | None = None, end: date | None = None) -> list[dict]:
-    """Trade-related events: submit, fill, partial_fill."""
+    """Trade-related events.
+
+    Includes both legacy event names (``submit``, ``fill``, ``partial_fill``)
+    used by the older execution path and the Round-8 pipeline names
+    (``trade_submit``, ``trade_fill``, ``trade_partial_fill``) emitted by
+    :class:`src.runtime.trade_pipeline.TradePipeline`. Without the new names
+    here, real broker submissions journal correctly but never reach the UI.
+    """
     return read_events(
-        start=start, end=end, event_filter=("submit", "fill", "partial_fill", "submit_dry_run")
+        start=start,
+        end=end,
+        event_filter=(
+            # Legacy names — kept for backward compat with older journals.
+            "submit",
+            "fill",
+            "partial_fill",
+            "submit_dry_run",
+            # Pipeline names from src/runtime/trade_pipeline.py.
+            "trade_submit",
+            "trade_fill",
+            "trade_partial_fill",
+        ),
     )
 
 

@@ -176,11 +176,20 @@ def test_kill_writes_journal_intent_and_complete(tmp_path, monkeypatch):
     assert events == ["kill_intent", "kill_complete"]
 
 
-def test_bot_status_returns_stopped_initially(client, monkeypatch):
-    """GET /api/bot/status before any start returns state=stopped."""
+def test_bot_status_returns_stopped_initially(client, monkeypatch, tmp_path):
+    """GET /api/bot/status before any start returns state=stopped.
+
+    Isolates pidfile/log paths — without this, the supervisor's
+    ``_adopt_orphan_if_present()`` reads the real ``live/runtime/runner.pid``
+    on this machine and adopts whatever bot is actually running. That's
+    correct production behavior but breaks test reproducibility on a dev
+    box that happens to have an overnight bot up.
+    """
     from dashboard.api import runner_control as rc
-    # Reset singleton so this test gets a fresh supervisor against a tmp pidfile.
     monkeypatch.setattr(rc, "_supervisor", None)
+    monkeypatch.setattr(rc, "_PIDFILE", tmp_path / "runner.pid")
+    monkeypatch.setattr(rc, "_LOGFILE", tmp_path / "runner.log")
+    monkeypatch.setattr(rc, "_RUNTIME_DIR", tmp_path)
     r = client.get("/api/bot/status")
     assert r.status_code == 200
     body = r.json()

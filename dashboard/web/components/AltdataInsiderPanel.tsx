@@ -2,7 +2,8 @@
 import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
-function fmtUsd(n: number) {
+function fmtUsd(n: number | null | undefined) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return n.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -75,7 +76,9 @@ export function AltdataInsiderPanel() {
                       {r.side}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-right">{r.shares.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right">
+                    {r.shares !== null && r.shares !== undefined ? r.shares.toLocaleString() : "—"}
+                  </td>
                   <td className="px-4 py-2 text-right">${fmtUsd(r.value_usd)}</td>
                 </tr>
               );
