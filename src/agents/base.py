@@ -21,6 +21,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from src.agents.autonomous_reasoner import AutonomousReasoner, SignalJudgment
+    from src.agents.reasoner_filter import ContextBuilder
     from src.strategies.base import Signal, Strategy
 
 
@@ -79,6 +81,9 @@ class Agent(ABC):
         strategies: Iterable[Strategy],
         universe: Iterable[str],
         heat_allocation: float = 0.0,
+        *,
+        reasoner: AutonomousReasoner | None = None,
+        reasoner_context_builder: ContextBuilder | None = None,
     ) -> None:
         self.strategies: list[Strategy] = list(strategies)
         self.universe: tuple[str, ...] = tuple(universe)
@@ -89,10 +94,37 @@ class Agent(ABC):
         self._coherence: float = float("nan")
         self._last_eval_ts: datetime | None = None
         self._n_open_positions: int = 0
+        # Optional autonomous-reasoner wiring. When BOTH a reasoner AND a
+        # context-builder are provided, subclasses should call
+        # ``self._apply_reasoner(signals)`` at the end of ``evaluate()`` to
+        # let the LLM dampen / halt rule-based signals before they reach
+        # the risk gate. Default None means rule-based behavior is
+        # unchanged (the reasoner is opt-in per-agent).
+        self._reasoner = reasoner
+        self._reasoner_ctx_builder = reasoner_context_builder
+        self._last_judgments: list[SignalJudgment] = []
 
     @abstractmethod
     def evaluate(self, bars: dict[str, Any]) -> list[Signal]:
         """Run all strategies on the bars, return list[Signal]."""
+
+    def _apply_reasoner(self, signals: list[Signal]) -> list[Signal]:
+        """Apply the autonomous reasoner to a list of rule-based signals.
+
+        No-op if the agent wasn't constructed with a reasoner + context
+        builder. The full audit trail is kept on ``self._last_judgments``
+        for the dashboard / journal to consume.
+        """
+        if self._reasoner is None or self._reasoner_ctx_builder is None:
+            self._last_judgments = []
+            return signals
+        from src.agents.reasoner_filter import apply_reasoner_to_signals
+
+        filtered, judgments = apply_reasoner_to_signals(
+            signals, self._reasoner, self._reasoner_ctx_builder
+        )
+        self._last_judgments = judgments
+        return filtered
 
     def status(self) -> AgentStatus:
         """Return a snapshot of the agent's current state."""

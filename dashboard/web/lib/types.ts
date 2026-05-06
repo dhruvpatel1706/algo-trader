@@ -231,3 +231,4 @@ export type BotStatus = {
   log_tail: string[];
   adopted: boolean;
 };
+

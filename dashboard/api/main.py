@@ -127,6 +127,8 @@ def bot_stop(supervisor: _SupervisorDep, body: BotActionRequest) -> dict:
     return status_to_dict(supervisor.stop())
 
 
+
+
 @app.get("/api/portfolio")
 def portfolio(broker: _BrokerDep) -> dict:
     acc = broker.get_account()

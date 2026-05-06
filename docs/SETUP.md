@@ -130,25 +130,45 @@ Checked `~/.claude.json` (global Claude Code config) and `algo-trader/.mcp.json`
 
 ---
 
-## What to build from xynth.com
+## Autonomous LLM reasoner — the trade-decision pivot (round 5)
 
-Research agent compared xynth.com to the current algo-trader codebase. Their site claims a 300+ alt-data feed AI agent for retail traders ($49–$179/mo). 70% of their feature surface is **already in algo-trader**, often with stricter risk/journal/walk-forward discipline. The two genuinely worth replicating:
+**No chatbot.** The bot does NOT wait for the operator to type questions. Instead, every candidate signal gets evaluated by an LLM **inside the trade pipeline**, before the existing risk gate sees it.
 
-### BUILD — NL research agent
+**Module:** [`src/agents/autonomous_reasoner.py`](src/agents/autonomous_reasoner.py) — one `evaluate(signal_context)` call per candidate signal. Returns:
 
-**What it is:** "Ask a question, get a setup." User types "show me unusual NVDA call flow today" → Claude plans → runs backtest CLI → returns trade idea with entry/exit levels.
+```python
+SignalJudgment(
+    multiplier: float,   # CLAMPED to [0.5, 1.2] — never trust raw LLM output
+    halt: bool,          # veto vote
+    reasoning: str,      # de-anonymized, journaled
+    fail_open: bool,     # True when LLM unavailable -> identity behavior
+)
+```
 
-**Why for us:** thin wrapper over our existing Polars data lake + walk-forward backtester. Routes through the new `src/llm/router.py` so it gets the multi-provider fallback for free. Stays *governance-only* — output is a research note, NOT auto-orders. Maintains the project's "LLM as governance, not oracle" rule.
+**Hard rules baked in (with tests pinning each):**
 
-**Effort:** ~1 day. New `src/research/nl_agent.py` + a `/api/research/ask` FastAPI endpoint + a chat panel in the dashboard.
+1. Multiplier is clamped into `[0.5, 1.2]`. A hallucinated 50× clamps to 1.2. A negative number clamps to 0.5. NaN/inf → 1.0.
+2. The reasoner can dampen signals or veto via `halt=True`. It CANNOT raise position sizing past the risk gate's caps.
+3. Tickers are anonymized to `[ASSET_<id>]` placeholders before the LLM sees them (Deep90 anti-bias pattern). De-anonymized in the journaled reasoning.
+4. LLM unavailable → `multiplier=1.0, halt=False, fail_open=True`. The rule-based pipeline runs unmodified during outages — a chronic LLM problem must NEVER take the bot down.
+5. Every evaluation is journaled with the prompt, raw response, multiplier, reasoning. Auditable end-to-end.
 
-### BUILD-LITE — Gamma exposure / dealer-positioning views
+**Wiring:** opt-in per agent via `Agent(reasoner=..., reasoner_context_builder=...)`. When wired, `agent._apply_reasoner(signals)` is called after `generate_signals()` and before the risk gate. The audit trail lives on `agent._last_judgments`.
 
-**What it is:** Dealer GEX (gamma exposure) heatmap — a regime indicator showing where dealers are short/long gamma, which informs whether market behavior will be mean-reverting (negative GEX) or trend-following (positive GEX).
+**Default chain** (from `src/llm/router.py`): Anthropic Haiku 4.5 → Gemini 2.5 Flash → OpenAI gpt-4.1-mini. Skips providers whose keys aren't set. Set ANY ONE to unblock; all three for fallback resilience.
 
-**Why for us:** useful regime input for `macro_regime_filter`. Computes from any options chain — once you wire `POLYGON_OPTIONS_KEY`, GEX is one Polars query away.
+## Gamma exposure (GEX) — regime indicator
 
-**Effort:** ~1 day after Polygon options is signed up. Defer until Tier 3 options is in.
+**Module:** [`src/signals/gex.py`](src/signals/gex.py). Black-Scholes gamma + SqueezeMetrics-convention dealer GEX aggregation. Tested against synthetic option chains (24 tests) — math is correct independent of any vendor.
+
+```python
+from src.signals.gex import compute_dealer_gex, gex_regime_multiplier
+summary = compute_dealer_gex(spot=4500.0, chain=option_rows)
+# summary.regime is one of: "positive_gamma", "neutral", "negative_gamma"
+# multiplier = gex_regime_multiplier(summary.regime)  # 0.65 / 1.0 / 1.15
+```
+
+**Production wiring** is gated on `POLYGON_OPTIONS_KEY` — the math is shipped, the chain feed isn't yet. When you sign up Polygon options, write a `fetch_option_chain(ticker)` adapter in `src/data/loader.py` and feed `compute_dealer_gex` from there. Use the multiplier as a confidence input to `macro_regime_filter` and any mean-reversion strategy.
 
 ### SKIP
 

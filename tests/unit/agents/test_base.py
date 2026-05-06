@@ -106,3 +106,90 @@ def test_assetclass_values_stable():
     assert AssetClass.BONDS.value == "bonds"
     assert AssetClass.CRYPTO.value == "crypto"
     assert AssetClass.GOVERNANCE.value == "governance"
+
+
+def test_apply_reasoner_is_noop_when_unconfigured():
+    """Default-constructed agents have no reasoner — passthrough behavior."""
+    from decimal import Decimal
+
+    from src.strategies.base import Signal
+
+    class _A(Agent):
+        name = "a"
+
+        def evaluate(self, bars):
+            return []
+
+    a = _A(strategies=[], universe=("SPY",))
+    sig = Signal(
+        symbol="SPY",
+        side="buy",
+        entry=Decimal("100"),
+        stop=Decimal("95"),
+        target=None,
+        confidence=0.7,
+        strategy_tag="x",
+        timestamp=datetime.now(UTC),
+    )
+    out = a._apply_reasoner([sig])
+    assert out == [sig]
+    assert a._last_judgments == []
+
+
+def test_apply_reasoner_runs_when_configured():
+    """When a reasoner + context builder is provided, the agent calls them
+    and adjusts confidence accordingly. Audit trail lives on `_last_judgments`."""
+    from decimal import Decimal
+
+    from src.agents.autonomous_reasoner import SignalContext, SignalJudgment
+    from src.strategies.base import Signal
+
+    class _StubReasoner:
+        def evaluate(self, ctx):
+            return SignalJudgment(
+                multiplier=0.5,
+                halt=False,
+                reasoning="dampened",
+                provider="stub",
+                elapsed_ms=1,
+                asof="2026-05-06T00:00:00+00:00",
+            )
+
+    def ctx_builder(sig):
+        return SignalContext(
+            symbol=sig.symbol,
+            side=sig.side,
+            strategy=sig.strategy_tag,
+            rule_confidence=sig.confidence,
+            entry_price=float(sig.entry),
+            stop_price=float(sig.stop),
+            target_price=None,
+        )
+
+    class _A(Agent):
+        name = "a"
+
+        def evaluate(self, bars):
+            return []
+
+    a = _A(
+        strategies=[],
+        universe=("SPY",),
+        reasoner=_StubReasoner(),  # type: ignore[arg-type]
+        reasoner_context_builder=ctx_builder,
+    )
+    sig = Signal(
+        symbol="SPY",
+        side="buy",
+        entry=Decimal("100"),
+        stop=Decimal("95"),
+        target=None,
+        confidence=0.8,
+        strategy_tag="x",
+        timestamp=datetime.now(UTC),
+    )
+    out = a._apply_reasoner([sig])
+    assert len(out) == 1
+    assert out[0].confidence == pytest.approx(0.4)
+    assert len(a._last_judgments) == 1
+    assert a._last_judgments[0].multiplier == 0.5

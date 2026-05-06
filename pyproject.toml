@@ -123,6 +123,21 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 # exception classes are private taxonomy not exposed in the public API; the
 # multiplication-sign typography in the docstring is intentional.
 "src/llm/router.py" = ["PLC0415", "PLW0603", "N818", "RUF002"]
+# Black-Scholes uses uppercase ``T`` for time-to-expiry (years) — fighting
+# this convention would diverge from every published derivatives reference.
+"src/signals/gex.py" = ["N803"]
+"tests/unit/signals/test_gex.py" = ["N803", "N806"]
+# Lazy import of `apply_reasoner_to_signals` inside Agent._apply_reasoner
+# avoids a circular import (reasoner_filter imports Signal from strategies.base
+# which imports Agent base on the side via type-checking).
+"src/agents/base.py" = ["PLC0415"]
+# Lazy `from datetime import` inside reasoner_filter helper avoids importing
+# datetime at module scope when it's only needed for the rare audit-failure
+# path. PLC0415 noise.
+"src/agents/reasoner_filter.py" = ["PLC0415"]
+# autonomous_reasoner: lazy `import math` inside _clamp / _parse_verdict
+# happens on the hot path (called once per signal). Keep it local for clarity.
+"src/agents/autonomous_reasoner.py" = ["PLC0415"]
 # Integration tests legitimately shell out via subprocess.
 "tests/integration/**" = ["S603", "S607", "PLW1510"]
 
