@@ -1,660 +1,1053 @@
 #!/usr/bin/env python3
-"""Live-readiness checker.
+"""Phase 9 live-readiness gate.
 
-Audits whether a strategy (or the whole portfolio) is ready to graduate from
-paper to small real capital. Each of 9 gates returns PASS or FAIL with the
-measured value and a reason. All 9 must PASS for promotion.
+Read-only audit. Never touches state. Run weekly during paper validation.
 
-Usage:
-  uv run python scripts/check_live_ready.py --strategy <name>
-  uv run python scripts/check_live_ready.py --portfolio
-  uv run python scripts/check_live_ready.py --strategy <name> --json
-  uv run python scripts/check_live_ready.py --strategy <name> --asof 2026-05-01
+This is the gate between paper and live: per project plan (Phase 9), no
+strategy moves real money without passing all 9 criteria below. The script
+reports PASS / FAIL / INDETERMINATE per criterion, never exits non-zero
+(it is a report, not a CI gate).
+
+The 9 criteria
+--------------
+1. Forward paper duration:        >= 180 days since first trade
+2. Live Sharpe vs backtest:        live_sharpe >= 0.7 * backtest_sharpe
+3. Live max DD vs backtest:        live_dd <= 1.3 * backtest_dd
+4. Total trades (per strategy):    >= 150
+5. Slippage MAE (live vs ideal):   <= 5 bps
+6. Risk-cap breaches in journal:   0 in last 90 days
+7. Coherence (live_WR/backtest_WR): >= 0.5 in last 30 days
+8. Drift detector halt count:      0 in last 30 days
+9. Pairwise correlation w/ others: <= 0.7 alarm threshold
+
+Note on (6): "breach" means a cap *violation* that should not have happened
+(cap_breach_alert event), NOT a refusal (which is the cap doing its job).
+For v1 we count `event=cap_breach_alert` records; refusals are healthy.
+
+The script accepts an optional ``--backtest-summary <json>`` file mapping
+``strategy_name -> {sharpe, max_dd, win_rate, n_trades}``. Without it,
+criteria 2 / 3 / 7 are INDETERMINATE because they need the backtest baseline.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
+import math
 import sys
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, Literal
 
-REPO = Path(__file__).resolve().parent.parent
+import numpy as np
+import pandas as pd
 
-# ---------------------------------------------------------------------------
-# Result types
-# ---------------------------------------------------------------------------
+logger = logging.getLogger("check_live_ready")
+
+CriterionResult = Literal["PASS", "FAIL", "INDETERMINATE"]
+OverallResult = Literal["READY", "NOT_READY", "INDETERMINATE"]
+
+# Thresholds — single source of truth, also referenced by docs/live_readiness.md.
+THRESHOLD_FORWARD_DAYS: int = 180
+THRESHOLD_SHARPE_RATIO: float = 0.7
+THRESHOLD_DD_RATIO: float = 1.3
+THRESHOLD_MIN_TRADES: int = 150
+THRESHOLD_SLIPPAGE_BPS: float = 5.0
+THRESHOLD_RISK_BREACH_WINDOW_DAYS: int = 90
+THRESHOLD_COHERENCE_WINDOW_DAYS: int = 30
+THRESHOLD_COHERENCE_RATIO: float = 0.5
+THRESHOLD_DRIFT_WINDOW_DAYS: int = 30
+THRESHOLD_CORRELATION: float = 0.7
+CORRELATION_LOOKBACK_DAYS: int = 63
+
+TRADING_DAYS_PER_YEAR: int = 252
 
 
-@dataclass(frozen=True, slots=True)
-class GateAudit:
-    gate_id: int
+# --------------------------------------------------------------------------- #
+# Data classes                                                                #
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(slots=True)
+class CriterionCheck:
+    """One criterion's outcome. ``measured`` carries raw numbers for the report."""
+
+    n: int
     name: str
-    threshold: str
-    actual: str | None
-    passed: bool
-    reason: str
-
-    def to_dict(self) -> dict:
-        return {
-            "gate_id": self.gate_id,
-            "name": self.name,
-            "threshold": self.threshold,
-            "actual": self.actual,
-            "passed": self.passed,
-            "reason": self.reason,
-        }
+    result: CriterionResult
+    detail: str
+    measured: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True, slots=True)
-class ReadinessResult:
-    target: str
-    asof: date
-    gates: tuple[GateAudit, ...]
-    all_passed: bool
+@dataclass(slots=True)
+class StrategyReport:
+    """All 9 criteria for one strategy + an overall verdict."""
 
-    def to_dict(self) -> dict:
-        return {
-            "target": self.target,
-            "asof": self.asof.isoformat(),
-            "all_passed": self.all_passed,
-            "gates": [g.to_dict() for g in self.gates],
-        }
+    strategy: str
+    asof: str
+    criteria: list[CriterionCheck]
+    overall: OverallResult
+    blocking: list[int]
 
 
-# ---------------------------------------------------------------------------
-# Helpers (defensive: never raise on missing/corrupt data)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+# Journal I/O                                                                 #
+# --------------------------------------------------------------------------- #
 
 
-def _latest_backtest_metrics(strategy: str, repo: Path = REPO) -> dict | None:
-    """Return parsed metrics.json from the latest backtest run, or None."""
-    bt_root = repo / "backtests" / strategy
-    if not bt_root.is_dir():
-        return None
-    runs = sorted(
-        (p for p in bt_root.iterdir() if p.is_dir() and (p / "metrics.json").is_file()),
-        key=lambda p: p.name,
-    )
-    if not runs:
-        return None
-    metrics_path = runs[-1] / "metrics.json"
-    try:
-        return json.loads(metrics_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _read_journal_records(asof: date, days: int, repo: Path = REPO) -> list[dict]:
-    """Read journal records over the last `days` ending at `asof`. Defensive."""
-    journal_dir = repo / "journal"
-    if not journal_dir.is_dir():
+def _read_jsonl_file(path: Path) -> list[dict[str, Any]]:
+    """Parse one JSONL file. Skip blank or malformed lines silently."""
+    if not path.exists() or not path.is_file():
         return []
-    records: list[dict] = []
-    for offset in range(days):
-        d = asof - timedelta(days=offset)
-        path = journal_dir / f"{d.isoformat()}.jsonl"
-        if not path.is_file():
+    out: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
             continue
         try:
-            for raw_line in path.read_text().splitlines():
-                line = raw_line.strip()
-                if not line:
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-        except OSError:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
             continue
-    return records
-
-
-def _filter_strategy(records: list[dict], strategy: str) -> list[dict]:
-    """Keep only records that mention this strategy (best-effort)."""
-    out = []
-    for r in records:
-        if r.get("strategy") == strategy:
-            out.append(r)
-            continue
-        # fall through: also accept if cycle_id contains the strategy tag
-        cycle = r.get("cycle_id", "")
-        if isinstance(cycle, str) and strategy in cycle:
-            out.append(r)
     return out
 
 
-# ---------------------------------------------------------------------------
-# Individual gate auditors. Each returns a GateAudit and never raises.
-# ---------------------------------------------------------------------------
+def read_all_journal_events(journal_dir: Path) -> list[dict[str, Any]]:
+    """Read every YYYY-MM-DD.jsonl file in ``journal_dir``. Returns time-sorted events."""
+    if not journal_dir.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for path in sorted(journal_dir.glob("*.jsonl")):
+        events.extend(_read_jsonl_file(path))
+
+    def _ts(ev: dict[str, Any]) -> str:
+        ts = ev.get("ts", "")
+        return ts if isinstance(ts, str) else ""
+
+    events.sort(key=_ts)
+    return events
 
 
-def _gate_paper_duration(
-    strategy: str, asof: date, records: list[dict]
-) -> GateAudit:
-    """Gate 1: forward paper duration >= 6 months."""
-    strat_records = _filter_strategy(records, strategy)
-    if not strat_records:
-        return GateAudit(
-            gate_id=1,
-            name="Forward paper duration >= 6 months",
-            threshold=">=6 months of forward paper trades",
-            actual=None,
-            passed=False,
-            reason="no live data yet -- paper validation pending",
-        )
-    timestamps: list[datetime] = []
-    for r in strat_records:
-        ts = r.get("ts")
-        if not isinstance(ts, str):
-            continue
-        try:
-            timestamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
-        except ValueError:
-            continue
-    if not timestamps:
-        return GateAudit(
-            gate_id=1,
-            name="Forward paper duration >= 6 months",
-            threshold=">=6 months of forward paper trades",
-            actual=None,
-            passed=False,
-            reason="no parsable timestamps in journal",
-        )
-    span_days = (max(timestamps).date() - min(timestamps).date()).days
-    passed = span_days >= 180
-    return GateAudit(
-        gate_id=1,
-        name="Forward paper duration >= 6 months",
-        threshold=">=180 days span",
-        actual=f"{span_days} days",
-        passed=passed,
-        reason=("span sufficient" if passed else "needs more forward-paper time"),
-    )
+def _parse_ts(ev: dict[str, Any]) -> datetime | None:
+    """Parse ev['ts'] (ISO8601) into a UTC-aware datetime, or None if unparseable."""
+    raw = ev.get("ts")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
-def _gate_live_sharpe(
-    strategy: str, asof: date, records: list[dict], backtest: dict | None
-) -> GateAudit:
-    """Gate 2: live Sharpe >= 0.7 * backtest Sharpe."""
-    if backtest is None or "sharpe" not in backtest:
-        return GateAudit(
-            gate_id=2,
-            name="Live Sharpe >= 0.7 x backtest Sharpe",
-            threshold="live_sharpe >= 0.7 * backtest_sharpe",
-            actual=None,
-            passed=False,
-            reason="no backtest metrics.json found",
-        )
-    live_records = _filter_strategy(records, strategy)
-    live_sharpe = None
-    for r in reversed(live_records):
-        if "live_sharpe" in r:
-            try:
-                live_sharpe = float(r["live_sharpe"])
-                break
-            except (TypeError, ValueError):
-                continue
-    if live_sharpe is None:
-        return GateAudit(
-            gate_id=2,
-            name="Live Sharpe >= 0.7 x backtest Sharpe",
-            threshold="live_sharpe >= 0.7 * backtest_sharpe",
-            actual=None,
-            passed=False,
-            reason="no live data yet -- paper validation pending",
-        )
-    bt_sharpe = float(backtest["sharpe"])
-    threshold = 0.7 * bt_sharpe
-    passed = live_sharpe >= threshold
-    return GateAudit(
-        gate_id=2,
-        name="Live Sharpe >= 0.7 x backtest Sharpe",
-        threshold=f">= {threshold:.3f} (0.7 x {bt_sharpe:.3f})",
-        actual=f"{live_sharpe:.3f}",
-        passed=passed,
-        reason=("ratio acceptable" if passed else "live Sharpe degraded too much"),
-    )
+def _filter_strategy(events: list[dict[str, Any]], strategy: str) -> list[dict[str, Any]]:
+    return [e for e in events if e.get("strategy") == strategy]
 
 
-def _gate_live_max_dd(
-    strategy: str, asof: date, records: list[dict], backtest: dict | None
-) -> GateAudit:
-    """Gate 3: live max DD <= 1.3 * backtest max DD."""
-    if backtest is None or "max_dd" not in backtest:
-        return GateAudit(
-            gate_id=3,
-            name="Live max DD <= 1.3 x backtest max DD",
-            threshold="live_max_dd <= 1.3 * backtest_max_dd",
-            actual=None,
-            passed=False,
-            reason="no backtest metrics.json found",
-        )
-    live_records = _filter_strategy(records, strategy)
-    live_dd = None
-    for r in reversed(live_records):
-        if "live_max_dd" in r:
-            try:
-                live_dd = float(r["live_max_dd"])
-                break
-            except (TypeError, ValueError):
-                continue
-    if live_dd is None:
-        return GateAudit(
-            gate_id=3,
-            name="Live max DD <= 1.3 x backtest max DD",
-            threshold="live_max_dd <= 1.3 * backtest_max_dd",
-            actual=None,
-            passed=False,
-            reason="no live data yet -- paper validation pending",
-        )
-    bt_dd = float(backtest["max_dd"])
-    threshold = 1.3 * bt_dd
-    passed = live_dd <= threshold
-    return GateAudit(
-        gate_id=3,
-        name="Live max DD <= 1.3 x backtest max DD",
-        threshold=f"<= {threshold:.4f} (1.3 x {bt_dd:.4f})",
-        actual=f"{live_dd:.4f}",
-        passed=passed,
-        reason=(
-            "drawdown within tolerance"
-            if passed
-            else "live drawdown exceeds modeled tail"
-        ),
-    )
+def _list_strategies(events: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    for e in events:
+        s = e.get("strategy")
+        if isinstance(s, str) and s:
+            seen.add(s)
+    return sorted(seen)
 
 
-def _gate_trade_count(
-    strategy: str, asof: date, records: list[dict]
-) -> GateAudit:
-    """Gate 4: >= 150 trades total."""
-    live_records = _filter_strategy(records, strategy)
-    n = sum(
-        1
-        for r in live_records
-        if r.get("event") in ("submit_dry_run", "submit", "fill")
-    )
-    passed = n >= 150
-    return GateAudit(
-        gate_id=4,
-        name="Trade count >= 150",
-        threshold=">=150 fills/submits",
-        actual=str(n),
-        passed=passed,
-        reason=(
-            "sample size adequate"
-            if passed
-            else "insufficient trades -- estimates dominated by noise"
-        ),
-    )
+# --------------------------------------------------------------------------- #
+# Trade extraction helpers                                                    #
+# --------------------------------------------------------------------------- #
 
 
-def _gate_slippage_mae(
-    strategy: str, asof: date, records: list[dict], backtest: dict | None
-) -> GateAudit:
-    """Gate 5: slippage MAE <= 5 bps vs backtest assumption."""
-    live_records = _filter_strategy(records, strategy)
-    bps_values: list[float] = []
-    for r in live_records:
-        v = r.get("slippage_bps")
+def _is_fill(ev: dict[str, Any]) -> bool:
+    return ev.get("event") in {"fill", "partial_fill"}
+
+
+def _fill_price(ev: dict[str, Any]) -> float | None:
+    for k in ("fill_price", "filled_avg_price", "price"):
+        v = ev.get(k)
         if v is None:
             continue
         try:
-            bps_values.append(abs(float(v)))
+            return float(v)
         except (TypeError, ValueError):
             continue
-    if not bps_values:
-        return GateAudit(
-            gate_id=5,
-            name="Slippage MAE <= 5 bps",
-            threshold="MAE <= 5 bps",
-            actual=None,
-            passed=False,
-            reason="no slippage_bps records in journal yet",
-        )
-    mae = sum(bps_values) / len(bps_values)
-    passed = mae <= 5.0
-    return GateAudit(
-        gate_id=5,
-        name="Slippage MAE <= 5 bps",
-        threshold="MAE <= 5 bps",
-        actual=f"{mae:.2f} bps",
-        passed=passed,
-        reason=(
-            "slippage within modeled assumption"
-            if passed
-            else "live slippage exceeds backtest assumption"
-        ),
-    )
+    return None
 
 
-def _gate_risk_breaches(
-    strategy: str, asof: date, records: list[dict]
-) -> GateAudit:
-    """Gate 6: 0 risk-cap breaches in last 90 days."""
-    if not records or not _filter_strategy(records, strategy):
-        return GateAudit(
-            gate_id=6,
-            name="0 risk-cap breaches in last 90 days",
-            threshold="==0",
-            actual=None,
-            passed=False,
-            reason="no live data yet -- paper validation pending",
-        )
-    breaches = 0
-    for r in records:
-        if r.get("gate") == "risk" and r.get("decision") == "REJECT":
-            # Filter by strategy if the record names one; otherwise check cycle.
-            rec_strat = r.get("strategy")
-            cycle = r.get("cycle_id", "")
-            if rec_strat is None and (
-                not isinstance(cycle, str) or strategy not in cycle
-            ):
-                continue
-            breaches += 1
-    passed = breaches == 0
-    return GateAudit(
-        gate_id=6,
-        name="0 risk-cap breaches in last 90 days",
-        threshold="==0",
-        actual=str(breaches),
-        passed=passed,
-        reason=(
-            "no risk REJECTs"
-            if passed
-            else f"{breaches} risk REJECT records in last 90 days"
-        ),
-    )
-
-
-def _gate_coherence(
-    strategy: str, asof: date, records30: list[dict], backtest: dict | None
-) -> GateAudit:
-    """Gate 7: live_WR / backtest_WR >= 0.5 in last 30 days."""
-    if backtest is None or "win_rate" not in backtest:
-        return GateAudit(
-            gate_id=7,
-            name="Coherence (live_WR / backtest_WR) >= 0.5 (30d)",
-            threshold=">=0.5",
-            actual=None,
-            passed=False,
-            reason="no backtest win_rate available",
-        )
-    live_records = _filter_strategy(records30, strategy)
-    fills = [r for r in live_records if r.get("event") == "fill"]
-    if not fills:
-        return GateAudit(
-            gate_id=7,
-            name="Coherence (live_WR / backtest_WR) >= 0.5 (30d)",
-            threshold=">=0.5",
-            actual=None,
-            passed=False,
-            reason="no live fills in last 30 days",
-        )
-    wins = 0
-    counted = 0
-    for r in fills:
-        pnl = r.get("pnl")
-        if pnl is None:
+def _intended_price(ev: dict[str, Any]) -> float | None:
+    for k in ("intended_price", "limit_price", "expected_price"):
+        v = ev.get(k)
+        if v is None:
             continue
         try:
-            counted += 1
-            if float(pnl) > 0:
-                wins += 1
+            return float(v)
         except (TypeError, ValueError):
             continue
-    if counted == 0:
-        return GateAudit(
-            gate_id=7,
-            name="Coherence (live_WR / backtest_WR) >= 0.5 (30d)",
-            threshold=">=0.5",
-            actual=None,
-            passed=False,
-            reason="no fills carry pnl in last 30 days",
-        )
-    live_wr = wins / counted
-    bt_wr = float(backtest["win_rate"])
-    if bt_wr <= 0:
-        return GateAudit(
-            gate_id=7,
-            name="Coherence (live_WR / backtest_WR) >= 0.5 (30d)",
-            threshold=">=0.5",
-            actual=f"live_WR={live_wr:.3f}",
-            passed=False,
-            reason="backtest win_rate is zero or negative",
-        )
-    coherence = live_wr / bt_wr
-    passed = coherence >= 0.5
-    return GateAudit(
-        gate_id=7,
-        name="Coherence (live_WR / backtest_WR) >= 0.5 (30d)",
-        threshold=">=0.5",
-        actual=f"{coherence:.3f}",
-        passed=passed,
-        reason=(
-            "win-rate ratio coherent"
-            if passed
-            else "recent win-rate has drifted below half of backtest"
-        ),
-    )
+    return None
 
 
-def _gate_drift_halts(
-    strategy: str, asof: date, records30: list[dict]
-) -> GateAudit:
-    """Gate 8: 0 drift detector halts in last 30 days."""
-    if not records30 or not _filter_strategy(records30, strategy):
-        return GateAudit(
-            gate_id=8,
-            name="0 drift detector halts in last 30 days",
-            threshold="==0",
-            actual=None,
-            passed=False,
-            reason="no live data yet -- paper validation pending",
-        )
-    halts = 0
-    for r in records30:
-        evt = r.get("event") or r.get("gate")
-        if evt in ("drift_halt", "drift_detector_halt", "drift"):
-            if r.get("decision") == "HALT" or r.get("event") == "drift_halt":
-                halts += 1
-                continue
-        if evt == "drift" and r.get("status") == "halt":
-            halts += 1
-    passed = halts == 0
-    return GateAudit(
-        gate_id=8,
-        name="0 drift detector halts in last 30 days",
-        threshold="==0",
-        actual=str(halts),
-        passed=passed,
-        reason=(
-            "no drift halts"
-            if passed
-            else f"{halts} drift halt(s) in last 30 days"
-        ),
-    )
+def _trade_pnl(ev: dict[str, Any]) -> float | None:
+    """Realized PnL for a closing fill, if journaled. Falls back to ``realized_pnl``."""
+    for k in ("realized_pnl", "pnl", "trade_pnl"):
+        v = ev.get(k)
+        if v is None:
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
-def _gate_pairwise_correlation(
-    strategy: str, asof: date, records: list[dict]
-) -> GateAudit:
-    """Gate 9: pairwise correlation with all live strategies <= 0.7."""
-    corrs: dict[str, float] = {}
-    for r in records:
-        if r.get("event") == "pairwise_corr" and r.get("strategy") == strategy:
-            other = r.get("other")
-            v = r.get("corr")
-            if not isinstance(other, str):
-                continue
-            try:
-                corrs[other] = float(v)
-            except (TypeError, ValueError):
-                continue
-    if not corrs:
-        return GateAudit(
-            gate_id=9,
-            name="Pairwise correlation with all live strategies <= 0.7",
-            threshold="<=0.7 vs every live strategy",
-            actual=None,
-            passed=False,
-            reason="no pairwise_corr records yet",
-        )
-    worst_other = max(corrs, key=lambda k: corrs[k])
-    worst_v = corrs[worst_other]
-    passed = worst_v <= 0.7
-    return GateAudit(
-        gate_id=9,
-        name="Pairwise correlation with all live strategies <= 0.7",
-        threshold="<=0.7 vs every live strategy",
-        actual=f"max={worst_v:.3f} vs {worst_other}",
-        passed=passed,
-        reason=(
-            "diversification adequate"
-            if passed
-            else f"correlation {worst_v:.3f} with {worst_other} too high"
-        ),
-    )
+def _build_daily_pnl_series(
+    events: list[dict[str, Any]], strategy: str
+) -> pd.Series:
+    """Sum realized PnL per UTC day across fills with strategy=<strategy>.
 
-
-# ---------------------------------------------------------------------------
-# Public auditors
-# ---------------------------------------------------------------------------
-
-
-def audit_strategy(
-    strategy: str, asof: date, repo: Path = REPO
-) -> ReadinessResult:
-    """Run all 9 gates against `strategy`. Defensive: never raises."""
-    backtest = _latest_backtest_metrics(strategy, repo=repo)
-    # Pull three windows: 365d (gate 1 needs a wide window to measure span),
-    # 90d (gates 4, 6, 9 and the live aggregates for gates 2, 3, 5),
-    # 30d (gates 7, 8).
-    records365 = _read_journal_records(asof, days=365, repo=repo)
-    records90 = _read_journal_records(asof, days=90, repo=repo)
-    records30 = _read_journal_records(asof, days=30, repo=repo)
-
-    gates: tuple[GateAudit, ...] = (
-        _gate_paper_duration(strategy, asof, records365),
-        _gate_live_sharpe(strategy, asof, records90, backtest),
-        _gate_live_max_dd(strategy, asof, records90, backtest),
-        _gate_trade_count(strategy, asof, records90),
-        _gate_slippage_mae(strategy, asof, records90, backtest),
-        _gate_risk_breaches(strategy, asof, records90),
-        _gate_coherence(strategy, asof, records30, backtest),
-        _gate_drift_halts(strategy, asof, records30),
-        _gate_pairwise_correlation(strategy, asof, records90),
-    )
-    return ReadinessResult(
-        target=strategy,
-        asof=asof,
-        gates=gates,
-        all_passed=all(g.passed for g in gates),
-    )
-
-
-def audit_portfolio(asof: date, repo: Path = REPO) -> ReadinessResult:
-    """Run the audit for every strategy under backtests/ and aggregate.
-
-    The returned result has gates that are the union of per-strategy audits,
-    each gate prefixed with its strategy tag. all_passed iff every per-strategy
-    gate passed.
+    Returns an empty Series if no realized PnL is journaled.
     """
-    bt_root = repo / "backtests"
-    strategies: list[str] = []
-    if bt_root.is_dir():
-        strategies = sorted(
-            p.name for p in bt_root.iterdir() if p.is_dir() and not p.name.startswith(".")
+    rows: list[tuple[datetime, float]] = []
+    for ev in events:
+        if ev.get("strategy") != strategy or not _is_fill(ev):
+            continue
+        pnl = _trade_pnl(ev)
+        if pnl is None:
+            continue
+        ts = _parse_ts(ev)
+        if ts is None:
+            continue
+        rows.append((ts, pnl))
+    if not rows:
+        return pd.Series(dtype=float)
+    df = pd.DataFrame(rows, columns=["ts", "pnl"])
+    df["date"] = df["ts"].dt.floor("D")
+    return df.groupby("date")["pnl"].sum().sort_index()
+
+
+# --------------------------------------------------------------------------- #
+# Criterion implementations                                                   #
+# --------------------------------------------------------------------------- #
+
+
+def check_criterion_1_forward_paper_duration(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    asof: datetime,
+    threshold_days: int = THRESHOLD_FORWARD_DAYS,
+) -> CriterionCheck:
+    """Days between earliest journaled event for the strategy and ``asof``."""
+    strat_events = _filter_strategy(events, strategy)
+    earliest: datetime | None = None
+    for ev in strat_events:
+        ts = _parse_ts(ev)
+        if ts is None:
+            continue
+        if earliest is None or ts < earliest:
+            earliest = ts
+    if earliest is None:
+        return CriterionCheck(
+            n=1,
+            name="forward_paper_duration",
+            result="INDETERMINATE",
+            detail=f"no journaled events for strategy={strategy}",
+            measured={"days": None, "threshold": threshold_days},
         )
-    aggregated: list[GateAudit] = []
-    if not strategies:
-        aggregated.append(
-            GateAudit(
-                gate_id=0,
-                name="No strategies discovered",
-                threshold="backtests/<strategy>/ must exist",
-                actual=None,
-                passed=False,
-                reason="no strategy directories under backtests/",
-            )
-        )
-    for strat in strategies:
-        sub = audit_strategy(strat, asof, repo=repo)
-        for g in sub.gates:
-            aggregated.append(
-                GateAudit(
-                    gate_id=g.gate_id,
-                    name=f"[{strat}] {g.name}",
-                    threshold=g.threshold,
-                    actual=g.actual,
-                    passed=g.passed,
-                    reason=g.reason,
-                )
-            )
-    return ReadinessResult(
-        target="portfolio",
-        asof=asof,
-        gates=tuple(aggregated),
-        all_passed=all(g.passed for g in aggregated),
+    days = (asof - earliest).days
+    result: CriterionResult = "PASS" if days >= threshold_days else "FAIL"
+    return CriterionCheck(
+        n=1,
+        name="forward_paper_duration",
+        result=result,
+        detail=f"{days} days since first trade, threshold >= {threshold_days}",
+        measured={
+            "days": days,
+            "threshold": threshold_days,
+            "first_trade_ts": earliest.isoformat(),
+        },
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+def _annualized_sharpe(daily_pnl: pd.Series) -> float | None:
+    """Naive Sharpe on daily realized PnL. None if insufficient data."""
+    if len(daily_pnl) < 2:
+        return None
+    std = float(daily_pnl.std(ddof=1))
+    if std <= 0 or not math.isfinite(std):
+        return None
+    mean = float(daily_pnl.mean())
+    return mean / std * math.sqrt(TRADING_DAYS_PER_YEAR)
 
 
-def print_human_readable(result: ReadinessResult) -> None:
-    print(f"Live-readiness audit: {result.target}  asof={result.asof.isoformat()}")
-    print("-" * 78)
-    for g in result.gates:
-        marker = "PASS" if g.passed else "FAIL"
-        actual = g.actual if g.actual is not None else "n/a"
-        print(f"  [{marker}] gate {g.gate_id}: {g.name}")
-        print(f"         threshold: {g.threshold}")
-        print(f"         actual:    {actual}")
-        print(f"         reason:    {g.reason}")
-    print("-" * 78)
-    summary = "ALL PASS" if result.all_passed else "BLOCKED"
-    print(f"Overall: {summary}")
+def check_criterion_2_live_sharpe_vs_backtest(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    backtest_summary: dict[str, Any] | None,
+    threshold_ratio: float = THRESHOLD_SHARPE_RATIO,
+) -> CriterionCheck:
+    """live_sharpe >= threshold_ratio * backtest_sharpe."""
+    daily = _build_daily_pnl_series(events, strategy)
+    live_sharpe = _annualized_sharpe(daily)
+
+    bt_entry: dict[str, Any] | None = None
+    if backtest_summary is not None:
+        raw = backtest_summary.get(strategy)
+        if isinstance(raw, dict):
+            bt_entry = raw
+    bt_sharpe = None
+    if bt_entry is not None:
+        try:
+            bt_sharpe = float(bt_entry["sharpe"])
+        except (KeyError, TypeError, ValueError):
+            bt_sharpe = None
+
+    if live_sharpe is None or bt_sharpe is None:
+        return CriterionCheck(
+            n=2,
+            name="live_sharpe_vs_backtest",
+            result="INDETERMINATE",
+            detail=(
+                f"live_sharpe={live_sharpe} backtest_sharpe={bt_sharpe} "
+                "(need both to compute ratio)"
+            ),
+            measured={
+                "live_sharpe": live_sharpe,
+                "backtest_sharpe": bt_sharpe,
+                "threshold_ratio": threshold_ratio,
+            },
+        )
+    if bt_sharpe == 0:
+        return CriterionCheck(
+            n=2,
+            name="live_sharpe_vs_backtest",
+            result="INDETERMINATE",
+            detail="backtest_sharpe is zero — ratio undefined",
+            measured={
+                "live_sharpe": live_sharpe,
+                "backtest_sharpe": bt_sharpe,
+                "threshold_ratio": threshold_ratio,
+            },
+        )
+    ratio = live_sharpe / bt_sharpe
+    result: CriterionResult = "PASS" if ratio >= threshold_ratio else "FAIL"
+    return CriterionCheck(
+        n=2,
+        name="live_sharpe_vs_backtest",
+        result=result,
+        detail=(
+            f"live={live_sharpe:.2f}, backtest={bt_sharpe:.2f}, "
+            f"ratio {ratio:.2f} {'>=' if result == 'PASS' else '<'} {threshold_ratio:.2f}"
+        ),
+        measured={
+            "live_sharpe": live_sharpe,
+            "backtest_sharpe": bt_sharpe,
+            "ratio": ratio,
+            "threshold_ratio": threshold_ratio,
+        },
+    )
 
 
-def main() -> int:
+def _max_drawdown_from_daily_pnl(daily_pnl: pd.Series) -> float | None:
+    """Max drawdown of the cumulative-PnL equity curve. Returns positive fraction.
+
+    None if the curve never reaches a positive peak (so a relative DD is meaningless).
+    """
+    if daily_pnl.empty:
+        return None
+    equity = daily_pnl.cumsum()
+    peak = equity.cummax()
+    valid = peak > 0
+    if not valid.any():
+        return None
+    drawdown = (peak - equity) / peak
+    drawdown = drawdown[valid]
+    if drawdown.empty:
+        return None
+    md = float(drawdown.max())
+    if not math.isfinite(md):
+        return None
+    return md
+
+
+def check_criterion_3_live_dd_vs_backtest(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    backtest_summary: dict[str, Any] | None,
+    threshold_ratio: float = THRESHOLD_DD_RATIO,
+) -> CriterionCheck:
+    """live_dd <= threshold_ratio * backtest_dd."""
+    daily = _build_daily_pnl_series(events, strategy)
+    live_dd = _max_drawdown_from_daily_pnl(daily)
+
+    bt_entry: dict[str, Any] | None = None
+    if backtest_summary is not None:
+        raw = backtest_summary.get(strategy)
+        if isinstance(raw, dict):
+            bt_entry = raw
+    bt_dd = None
+    if bt_entry is not None:
+        try:
+            bt_dd = float(bt_entry["max_dd"])
+        except (KeyError, TypeError, ValueError):
+            bt_dd = None
+
+    if live_dd is None or bt_dd is None:
+        return CriterionCheck(
+            n=3,
+            name="live_max_dd_vs_backtest",
+            result="INDETERMINATE",
+            detail=(
+                f"live_dd={live_dd} backtest_dd={bt_dd} (need both to compute ratio)"
+            ),
+            measured={
+                "live_dd": live_dd,
+                "backtest_dd": bt_dd,
+                "threshold_ratio": threshold_ratio,
+            },
+        )
+    if bt_dd == 0:
+        # Can't form a ratio against zero. Pass iff live also ~zero.
+        result: CriterionResult = "PASS" if live_dd <= 0 else "FAIL"
+        return CriterionCheck(
+            n=3,
+            name="live_max_dd_vs_backtest",
+            result=result,
+            detail=f"backtest_dd is zero; live_dd={live_dd:.4f}",
+            measured={
+                "live_dd": live_dd,
+                "backtest_dd": bt_dd,
+                "threshold_ratio": threshold_ratio,
+            },
+        )
+    ratio = live_dd / bt_dd
+    result = "PASS" if ratio <= threshold_ratio else "FAIL"
+    return CriterionCheck(
+        n=3,
+        name="live_max_dd_vs_backtest",
+        result=result,
+        detail=(
+            f"live={live_dd:.4f}, backtest={bt_dd:.4f}, "
+            f"ratio {ratio:.2f} {'<=' if result == 'PASS' else '>'} {threshold_ratio:.2f}"
+        ),
+        measured={
+            "live_dd": live_dd,
+            "backtest_dd": bt_dd,
+            "ratio": ratio,
+            "threshold_ratio": threshold_ratio,
+        },
+    )
+
+
+def check_criterion_4_total_trades(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    threshold: int = THRESHOLD_MIN_TRADES,
+) -> CriterionCheck:
+    """Count fills (full and partial) for the strategy across all journaled history."""
+    n = sum(1 for ev in events if ev.get("strategy") == strategy and _is_fill(ev))
+    result: CriterionResult = "PASS" if n >= threshold else "FAIL"
+    return CriterionCheck(
+        n=4,
+        name="total_trades",
+        result=result,
+        detail=f"{n} {'>=' if result == 'PASS' else '<'} {threshold}",
+        measured={"n_trades": n, "threshold": threshold},
+    )
+
+
+def check_criterion_5_slippage_mae(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    threshold_bps: float = THRESHOLD_SLIPPAGE_BPS,
+) -> CriterionCheck:
+    """Mean absolute slippage in bps across fills with both fill_price and intended_price."""
+    abs_bps: list[float] = []
+    for ev in events:
+        if ev.get("strategy") != strategy or not _is_fill(ev):
+            continue
+        fp = _fill_price(ev)
+        ip = _intended_price(ev)
+        if fp is None or ip is None or ip == 0:
+            continue
+        abs_bps.append(abs(fp - ip) / abs(ip) * 10_000.0)
+    if not abs_bps:
+        return CriterionCheck(
+            n=5,
+            name="slippage_mae",
+            result="INDETERMINATE",
+            detail="no fills with both fill_price and intended_price journaled",
+            measured={"mae_bps": None, "n_fills": 0, "threshold_bps": threshold_bps},
+        )
+    mae = float(np.mean(abs_bps))
+    result: CriterionResult = "PASS" if mae <= threshold_bps else "FAIL"
+    return CriterionCheck(
+        n=5,
+        name="slippage_mae",
+        result=result,
+        detail=(
+            f"{mae:.2f} bps {'<=' if result == 'PASS' else '>'} {threshold_bps:.1f} bps"
+        ),
+        measured={"mae_bps": mae, "n_fills": len(abs_bps), "threshold_bps": threshold_bps},
+    )
+
+
+def check_criterion_6_risk_cap_breaches(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    asof: datetime,
+    window_days: int = THRESHOLD_RISK_BREACH_WINDOW_DAYS,
+) -> CriterionCheck:
+    """Count ``cap_breach_alert`` events for this strategy in the last ``window_days``.
+
+    A *breach* is a violation that should not have happened (a position got
+    through that exceeded a cap). Refusals (caps doing their job) are healthy
+    and are NOT counted here.
+    """
+    cutoff = asof - timedelta(days=window_days)
+    n = 0
+    for ev in events:
+        if ev.get("strategy") != strategy:
+            continue
+        if ev.get("event") != "cap_breach_alert":
+            continue
+        ts = _parse_ts(ev)
+        if ts is None or ts < cutoff:
+            continue
+        n += 1
+    result: CriterionResult = "PASS" if n == 0 else "FAIL"
+    return CriterionCheck(
+        n=6,
+        name="risk_cap_breaches",
+        result=result,
+        detail=f"{n} cap_breach_alert events in last {window_days}d",
+        measured={"n_breaches": n, "window_days": window_days},
+    )
+
+
+def _win_rate(events: list[dict[str, Any]], strategy: str, since: datetime | None) -> float | None:
+    """Fraction of fills with realized PnL > 0. None if no fills with PnL."""
+    pnls: list[float] = []
+    for ev in events:
+        if ev.get("strategy") != strategy or not _is_fill(ev):
+            continue
+        if since is not None:
+            ts = _parse_ts(ev)
+            if ts is None or ts < since:
+                continue
+        pnl = _trade_pnl(ev)
+        if pnl is None:
+            continue
+        pnls.append(pnl)
+    if not pnls:
+        return None
+    return float(sum(1 for p in pnls if p > 0) / len(pnls))
+
+
+def check_criterion_7_coherence(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    backtest_summary: dict[str, Any] | None,
+    asof: datetime,
+    window_days: int = THRESHOLD_COHERENCE_WINDOW_DAYS,
+    threshold_ratio: float = THRESHOLD_COHERENCE_RATIO,
+) -> CriterionCheck:
+    """live_WR (last 30 days) / backtest_WR >= threshold_ratio."""
+    since = asof - timedelta(days=window_days)
+    live_wr = _win_rate(events, strategy, since=since)
+
+    bt_entry: dict[str, Any] | None = None
+    if backtest_summary is not None:
+        raw = backtest_summary.get(strategy)
+        if isinstance(raw, dict):
+            bt_entry = raw
+    bt_wr = None
+    if bt_entry is not None:
+        try:
+            bt_wr = float(bt_entry["win_rate"])
+        except (KeyError, TypeError, ValueError):
+            bt_wr = None
+
+    if live_wr is None or bt_wr is None:
+        return CriterionCheck(
+            n=7,
+            name="coherence",
+            result="INDETERMINATE",
+            detail=(
+                f"live_wr_30d={live_wr} backtest_wr={bt_wr} (need both to compute ratio)"
+            ),
+            measured={
+                "live_win_rate_30d": live_wr,
+                "backtest_win_rate": bt_wr,
+                "threshold_ratio": threshold_ratio,
+                "window_days": window_days,
+            },
+        )
+    if bt_wr == 0:
+        return CriterionCheck(
+            n=7,
+            name="coherence",
+            result="INDETERMINATE",
+            detail="backtest_win_rate is zero — ratio undefined",
+            measured={
+                "live_win_rate_30d": live_wr,
+                "backtest_win_rate": bt_wr,
+                "threshold_ratio": threshold_ratio,
+                "window_days": window_days,
+            },
+        )
+    ratio = live_wr / bt_wr
+    result: CriterionResult = "PASS" if ratio >= threshold_ratio else "FAIL"
+    return CriterionCheck(
+        n=7,
+        name="coherence",
+        result=result,
+        detail=(
+            f"live_wr_30d={live_wr:.2f}, backtest_wr={bt_wr:.2f}, "
+            f"ratio {ratio:.2f} {'>=' if result == 'PASS' else '<'} {threshold_ratio:.2f}"
+        ),
+        measured={
+            "live_win_rate_30d": live_wr,
+            "backtest_win_rate": bt_wr,
+            "ratio": ratio,
+            "threshold_ratio": threshold_ratio,
+            "window_days": window_days,
+        },
+    )
+
+
+def check_criterion_8_drift_halts(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    asof: datetime,
+    window_days: int = THRESHOLD_DRIFT_WINDOW_DAYS,
+) -> CriterionCheck:
+    """Count ``drift_halt`` events for the strategy in last ``window_days``."""
+    cutoff = asof - timedelta(days=window_days)
+    n = 0
+    for ev in events:
+        if ev.get("strategy") != strategy:
+            continue
+        if ev.get("event") != "drift_halt":
+            continue
+        ts = _parse_ts(ev)
+        if ts is None or ts < cutoff:
+            continue
+        n += 1
+    result: CriterionResult = "PASS" if n == 0 else "FAIL"
+    return CriterionCheck(
+        n=8,
+        name="drift_halts",
+        result=result,
+        detail=f"{n} drift_halt events in last {window_days}d",
+        measured={"n_halts": n, "window_days": window_days},
+    )
+
+
+def check_criterion_9_pairwise_correlation(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    other_live_strategies: list[str],
+    asof: datetime,
+    lookback_days: int = CORRELATION_LOOKBACK_DAYS,
+    threshold: float = THRESHOLD_CORRELATION,
+) -> CriterionCheck:
+    """Max |Pearson correlation| of daily PnL between this strategy and any other."""
+    others = [s for s in other_live_strategies if s != strategy]
+    if not others:
+        return CriterionCheck(
+            n=9,
+            name="pairwise_correlation",
+            result="INDETERMINATE",
+            detail="no other live strategies to compare against",
+            measured={
+                "max_corr": None,
+                "n_other_strategies": 0,
+                "threshold": threshold,
+                "lookback_days": lookback_days,
+            },
+        )
+
+    cutoff = (asof - timedelta(days=lookback_days)).replace(tzinfo=UTC)
+    cutoff_ts = pd.Timestamp(cutoff)
+
+    def _filter_window(s: pd.Series) -> pd.Series:
+        """Trim to the lookback window, tolerating empty / non-datetime indexes."""
+        if s.empty:
+            return s
+        if not isinstance(s.index, pd.DatetimeIndex):
+            return s.iloc[0:0]
+        return s[s.index >= cutoff_ts]
+
+    base = _filter_window(_build_daily_pnl_series(events, strategy))
+    if len(base) < 2:
+        return CriterionCheck(
+            n=9,
+            name="pairwise_correlation",
+            result="INDETERMINATE",
+            detail=f"insufficient daily-PnL history for {strategy} in last {lookback_days}d",
+            measured={
+                "max_corr": None,
+                "n_other_strategies": len(others),
+                "threshold": threshold,
+                "lookback_days": lookback_days,
+            },
+        )
+
+    pair_corrs: dict[str, float] = {}
+    insufficient: list[str] = []
+    for other in others:
+        s = _filter_window(_build_daily_pnl_series(events, other))
+        joined = pd.concat([base.rename("a"), s.rename("b")], axis=1).dropna()
+        if len(joined) < 2:
+            insufficient.append(other)
+            continue
+        if joined["a"].std(ddof=1) == 0 or joined["b"].std(ddof=1) == 0:
+            insufficient.append(other)
+            continue
+        c = float(joined["a"].corr(joined["b"]))
+        if not math.isfinite(c):
+            insufficient.append(other)
+            continue
+        pair_corrs[other] = c
+
+    if not pair_corrs:
+        return CriterionCheck(
+            n=9,
+            name="pairwise_correlation",
+            result="INDETERMINATE",
+            detail=(
+                f"insufficient overlapping data with other strategies: "
+                f"{', '.join(insufficient) or 'none'}"
+            ),
+            measured={
+                "max_corr": None,
+                "n_other_strategies": len(others),
+                "pair_corrs": {},
+                "insufficient": insufficient,
+                "threshold": threshold,
+                "lookback_days": lookback_days,
+            },
+        )
+
+    max_other = max(pair_corrs.items(), key=lambda kv: abs(kv[1]))
+    max_abs = abs(max_other[1])
+    result: CriterionResult = "PASS" if max_abs <= threshold else "FAIL"
+    return CriterionCheck(
+        n=9,
+        name="pairwise_correlation",
+        result=result,
+        detail=(
+            f"max |corr| = {max_abs:.2f} with {max_other[0]} "
+            f"{'<=' if result == 'PASS' else '>'} {threshold:.2f}"
+        ),
+        measured={
+            "max_corr": max_other[1],
+            "max_corr_with": max_other[0],
+            "pair_corrs": pair_corrs,
+            "n_other_strategies": len(others),
+            "insufficient": insufficient,
+            "threshold": threshold,
+            "lookback_days": lookback_days,
+        },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Orchestration                                                               #
+# --------------------------------------------------------------------------- #
+
+
+def run_for_strategy(
+    strategy: str,
+    *,
+    events: list[dict[str, Any]],
+    backtest_summary: dict[str, Any] | None,
+    other_live_strategies: list[str],
+    asof: datetime | None = None,
+) -> StrategyReport:
+    """Run all 9 criteria and roll up to an overall verdict."""
+    asof = asof or datetime.now(UTC)
+    checks = [
+        check_criterion_1_forward_paper_duration(strategy, events=events, asof=asof),
+        check_criterion_2_live_sharpe_vs_backtest(
+            strategy, events=events, backtest_summary=backtest_summary
+        ),
+        check_criterion_3_live_dd_vs_backtest(
+            strategy, events=events, backtest_summary=backtest_summary
+        ),
+        check_criterion_4_total_trades(strategy, events=events),
+        check_criterion_5_slippage_mae(strategy, events=events),
+        check_criterion_6_risk_cap_breaches(strategy, events=events, asof=asof),
+        check_criterion_7_coherence(
+            strategy, events=events, backtest_summary=backtest_summary, asof=asof
+        ),
+        check_criterion_8_drift_halts(strategy, events=events, asof=asof),
+        check_criterion_9_pairwise_correlation(
+            strategy,
+            events=events,
+            other_live_strategies=other_live_strategies,
+            asof=asof,
+        ),
+    ]
+    blocking = [c.n for c in checks if c.result == "FAIL"]
+    if blocking:
+        overall: OverallResult = "NOT_READY"
+    elif all(c.result == "PASS" for c in checks):
+        overall = "READY"
+    else:
+        overall = "INDETERMINATE"
+    return StrategyReport(
+        strategy=strategy,
+        asof=asof.isoformat(),
+        criteria=checks,
+        overall=overall,
+        blocking=blocking,
+    )
+
+
+def _load_backtest_summary(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    if not path.exists():
+        logger.warning("backtest-summary path %s does not exist", path)
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("failed to parse %s: %s", path, exc)
+        return None
+    if not isinstance(data, dict):
+        logger.warning("backtest-summary must be a JSON object, got %s", type(data).__name__)
+        return None
+    return data
+
+
+def _portfolio_summary(reports: list[StrategyReport]) -> dict[str, Any]:
+    """Aggregate strategy reports into a portfolio-level view."""
+    n = len(reports)
+    ready = sum(1 for r in reports if r.overall == "READY")
+    not_ready = sum(1 for r in reports if r.overall == "NOT_READY")
+    indeterminate = sum(1 for r in reports if r.overall == "INDETERMINATE")
+    blocking_factors: dict[int, list[str]] = {}
+    for r in reports:
+        for cn in r.blocking:
+            blocking_factors.setdefault(cn, []).append(r.strategy)
+    return {
+        "n_strategies": n,
+        "ready": ready,
+        "not_ready": not_ready,
+        "indeterminate": indeterminate,
+        "blocking_factors": {str(k): v for k, v in sorted(blocking_factors.items())},
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Output                                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def _format_pretty(report: StrategyReport, report_path: Path | None) -> str:
+    lines: list[str] = []
+    lines.append(
+        f"Phase 9 Live-Readiness — strategy={report.strategy} — asof {report.asof}"
+    )
+    for c in report.criteria:
+        # Pad criterion name to a fixed column for readability.
+        col_name = f"[{c.n}/9] {c.name}".ljust(38)
+        col_result = c.result.ljust(15)
+        lines.append(f"{col_name}{col_result}({c.detail})")
+    lines.append("")
+    lines.append(f"Overall: {report.overall}")
+    if report.blocking:
+        lines.append(f"Blocking: {report.blocking}")
+    if report_path is not None:
+        lines.append(f"Detailed JSON: {report_path}")
+    return "\n".join(lines)
+
+
+def _format_portfolio_pretty(reports: list[StrategyReport], summary: dict[str, Any]) -> str:
+    lines: list[str] = []
+    lines.append("Phase 9 Live-Readiness — PORTFOLIO")
+    lines.append(
+        f"strategies={summary['n_strategies']}  "
+        f"ready={summary['ready']}  "
+        f"not_ready={summary['not_ready']}  "
+        f"indeterminate={summary['indeterminate']}"
+    )
+    for r in reports:
+        lines.append(
+            f"  - {r.strategy:30s} {r.overall:14s} "
+            f"blocking={r.blocking if r.blocking else '[]'}"
+        )
+    if summary["blocking_factors"]:
+        lines.append("")
+        lines.append("Blocking factors:")
+        for cn, strats in summary["blocking_factors"].items():
+            lines.append(f"  criterion {cn}: {', '.join(strats)}")
+    return "\n".join(lines)
+
+
+def _write_json_report(report: StrategyReport, report_dir: Path, asof: datetime) -> Path:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"live_ready_{report.strategy}_{asof.strftime('%Y-%m-%d')}.json"
+    path = report_dir / fname
+    path.write_text(json.dumps(asdict(report), indent=2, default=str), encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# CLI                                                                         #
+# --------------------------------------------------------------------------- #
+
+
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Audit whether a strategy is ready to graduate from paper to real capital."
+        prog="check_live_ready.py",
+        description="Phase 9 live-readiness gate (read-only audit).",
     )
-    p.add_argument("--strategy", help="Strategy tag to audit")
     p.add_argument(
-        "--portfolio", action="store_true", help="Audit whole portfolio"
+        "--strategy",
+        required=True,
+        help='Strategy name to audit. Use "all" to audit every strategy in the journal.',
     )
-    p.add_argument("--asof", help="YYYY-MM-DD, default today")
+    p.add_argument(
+        "--backtest-summary",
+        type=Path,
+        default=None,
+        help="JSON file mapping strategy_name -> {sharpe, max_dd, win_rate, n_trades}.",
+    )
+    p.add_argument(
+        "--journal-dir",
+        type=Path,
+        default=Path("journal"),
+        help="Directory containing YYYY-MM-DD.jsonl journal files (default: ./journal).",
+    )
+    p.add_argument(
+        "--portfolio",
+        action="store_true",
+        help="Also print a portfolio-level summary (implied when --strategy=all).",
+    )
     p.add_argument(
         "--json",
-        dest="emit_json",
         action="store_true",
-        help="Output machine-readable JSON",
+        help="Emit JSON to stdout instead of pretty text.",
     )
-    args = p.parse_args()
+    p.add_argument(
+        "--report-dir",
+        type=Path,
+        default=Path("live/runtime"),
+        help="Where to write detailed per-strategy JSON reports.",
+    )
+    p.add_argument(
+        "--log-level",
+        default="WARNING",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Python logging level for the script itself.",
+    )
+    return p
 
-    asof = date.fromisoformat(args.asof) if args.asof else date.today()
 
-    if args.strategy:
-        result = audit_strategy(args.strategy, asof)
-    elif args.portfolio:
-        result = audit_portfolio(asof)
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=getattr(logging, args.log_level), format="%(message)s")
+
+    asof = datetime.now(UTC)
+
+    journal_dir: Path = args.journal_dir
+    events = read_all_journal_events(journal_dir)
+
+    backtest_summary = _load_backtest_summary(args.backtest_summary)
+
+    if args.strategy == "all":
+        strategies = _list_strategies(events)
     else:
-        p.error("must specify --strategy or --portfolio")
-        return 2  # unreachable, p.error exits
+        strategies = [args.strategy]
 
-    if args.emit_json:
-        print(json.dumps(result.to_dict(), indent=2, default=str))
-    else:
-        print_human_readable(result)
-    return 0 if result.all_passed else 1
+    if not strategies:
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "asof": asof.isoformat(),
+                        "strategies": {},
+                        "portfolio": {
+                            "n_strategies": 0,
+                            "ready": 0,
+                            "not_ready": 0,
+                            "indeterminate": 0,
+                            "blocking_factors": {},
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                f"No strategies found in journal {journal_dir}. "
+                "Either the directory is empty or no events have a 'strategy' field.\n"
+            )
+        return 0
+
+    other_live = list(strategies)
+    reports: list[StrategyReport] = []
+    for s in strategies:
+        report = run_for_strategy(
+            s,
+            events=events,
+            backtest_summary=backtest_summary,
+            other_live_strategies=other_live,
+            asof=asof,
+        )
+        reports.append(report)
+
+    # Always write detailed JSON reports per strategy.
+    report_paths: dict[str, Path] = {}
+    for r in reports:
+        try:
+            report_paths[r.strategy] = _write_json_report(r, args.report_dir, asof)
+        except OSError as exc:
+            logger.warning("could not write report for %s: %s", r.strategy, exc)
+
+    portfolio = _portfolio_summary(reports)
+
+    if args.json:
+        out = {
+            "asof": asof.isoformat(),
+            "strategies": {
+                r.strategy: {
+                    "asof": r.asof,
+                    "overall": r.overall,
+                    "blocking": r.blocking,
+                    "criteria": [asdict(c) for c in r.criteria],
+                }
+                for r in reports
+            },
+            "portfolio": portfolio,
+        }
+        sys.stdout.write(json.dumps(out, indent=2, default=str) + "\n")
+        return 0
+
+    pieces: list[str] = []
+    for r in reports:
+        pieces.append(_format_pretty(r, report_paths.get(r.strategy)))
+    if args.portfolio or args.strategy == "all":
+        pieces.append("")
+        pieces.append(_format_portfolio_pretty(reports, portfolio))
+    sys.stdout.write("\n\n".join(pieces) + "\n")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
