@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { BotControl } from "./BotControl";
 import { KillSwitch } from "./KillSwitch";
 
 function fmt(n?: number, d = 2) {
@@ -118,6 +119,7 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <BotControl />
           <span
             className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
               haltState ? "bg-danger/20 text-danger" : "bg-success/20 text-success"

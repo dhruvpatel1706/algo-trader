@@ -1,7 +1,6 @@
 "use client";
 
 import { api } from "@/lib/api";
-import { demoEquity } from "@/lib/demo";
 import { fmtUsd, fmtUsdSigned, fmtPctSigned } from "@/lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -104,26 +103,36 @@ function annualizedReturn(values: number[]): number {
 
 export function PnlPredictor() {
   const equityQ = useQuery({ queryKey: ["equity-predict"], queryFn: api.equity });
-  const real = equityQ.data ?? [];
-  const usingDemo = real.length === 0;
-  const series = useMemo(
-    () => (usingDemo ? demoEquity().map((p) => p.total) : real.map((p) => p.total)),
-    [usingDemo, real],
-  );
+  const series = useMemo(() => (equityQ.data ?? []).map((p) => p.total), [equityQ.data]);
+  const isEmpty = series.length < 30;
   const last = series.at(-1) ?? 0;
-  const projections = useMemo(() => project(series, [30, 60, 90, 252]), [series]);
-  const annRet = annualizedReturn(series);
+  const projections = useMemo(
+    () => (isEmpty ? [] : project(series, [30, 60, 90, 252])),
+    [series, isEmpty],
+  );
+  const annRet = isEmpty ? 0 : annualizedReturn(series);
+
+  if (isEmpty) {
+    return (
+      <section className="rounded-2xl border border-border bg-surface shadow-card-soft">
+        <header className="flex items-center justify-between border-b border-border px-5 py-3">
+          <h2 className="text-sm font-semibold tracking-wide text-text">P&amp;L extrapolation</h2>
+          <span className="font-mono text-[11px] text-text-dim">
+            log-linear fit · 90% CI
+          </span>
+        </header>
+        <div className="px-5 py-8 text-center font-mono text-[11px] text-muted">
+          need at least 30 days of equity history to extrapolate
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-2xl border border-border bg-surface shadow-card-soft">
       <header className="flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold tracking-wide text-text">P&L extrapolation</h2>
-          {usingDemo && (
-            <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
-              demo
-            </span>
-          )}
         </div>
         <div className="font-mono text-[11px] text-text-dim">
           fit on log(equity) · 90% CI · {series.length} samples

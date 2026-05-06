@@ -1,12 +1,10 @@
 "use client";
 
 import { api } from "@/lib/api";
-import { demoEquity } from "@/lib/demo";
 import {
   fmtUsd,
   fmtUsdSigned,
   fmtPctSigned,
-  pnlColorClass,
   pnlGlowClass,
 } from "@/lib/format";
 import { useQuery } from "@tanstack/react-query";
@@ -32,9 +30,26 @@ function sparkline(values: number[], width = 96, height = 28): string {
 
 export function PnlHero() {
   const equityQ = useQuery({ queryKey: ["equity-hero"], queryFn: api.equity });
-  const live = equityQ.data ?? [];
-  const usingDemo = live.length === 0;
-  const series = usingDemo ? demoEquity().map((p) => ({ ts: p.ts, total: p.total })) : live;
+  const series = equityQ.data ?? [];
+  const isEmpty = series.length === 0;
+
+  if (isEmpty) {
+    return (
+      <section className="rounded-xl border border-border bg-gradient-to-br from-surface to-bg px-4 py-5 shadow-card-soft">
+        <div className="flex flex-col items-center text-center">
+          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-text-dim">
+            equity · day P&amp;L · all-time P&amp;L · drawdown
+          </p>
+          <p className="mt-2 font-mono text-sm text-muted">
+            no equity history yet
+          </p>
+          <p className="mt-1 font-mono text-[10px] text-muted">
+            connect Alpaca paper (set ALPACA_API_KEY in .env) and click <span className="text-success">Start</span> to populate
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   const last = series.at(-1)?.total ?? 0;
   const first = series[0]?.total ?? 0;
@@ -82,11 +97,6 @@ export function PnlHero() {
 
   return (
     <section className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-surface to-bg px-4 py-3 shadow-card-soft">
-      {usingDemo && (
-        <span className="absolute right-3 top-2 rounded-md border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
-          demo
-        </span>
-      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {stats.map((s, i) => {
           const emph =

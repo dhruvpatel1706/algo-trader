@@ -1,6 +1,5 @@
 "use client";
 import { api } from "@/lib/api";
-import { demoEquity } from "@/lib/demo";
 import type { EquityPoint } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { AreaSeries, createChart, IChartApi, LineSeries } from "lightweight-charts";
@@ -60,18 +59,9 @@ export function EquityChart({
         { ts: new Date(now * 1000).toISOString(), total: p.equity },
       ];
     }
-    // Final fallback: synthesize a 90-day demo curve so the chart is never empty.
-    return demoEquity().map((d) => ({
-      ts: d.ts,
-      total: d.total,
-      by_agent: d.by_agent,
-      drawdown: d.drawdown,
-    }));
+    return [];
   }, [series, equity.data, portfolio.data]);
-  const usingDemo =
-    !series &&
-    (!equity.data || equity.data.length === 0) &&
-    !portfolio.data?.equity;
+  const isEmpty = points.length === 0;
 
   useEffect(() => {
     if (!ref.current || chartRef.current) return;
@@ -174,13 +164,22 @@ export function EquityChart({
     <div className="rounded-2xl border border-border bg-surface p-5 shadow-card-soft">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-wide text-text">{title}</h2>
-        {usingDemo && (
-          <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
-            demo
-          </span>
-        )}
       </div>
-      <div ref={ref} style={{ height }} className="w-full" />
+      {isEmpty ? (
+        <div
+          style={{ height }}
+          className="flex flex-col items-center justify-center text-center"
+        >
+          <p className="font-mono text-[12px] text-text-dim">
+            no equity history yet
+          </p>
+          <p className="mt-1 font-mono text-[10px] text-muted">
+            connect Alpaca (set ALPACA_API_KEY) and start the bot to populate this curve
+          </p>
+        </div>
+      ) : (
+        <div ref={ref} style={{ height }} className="w-full" />
+      )}
     </div>
   );
 }

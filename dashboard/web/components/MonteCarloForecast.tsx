@@ -1,7 +1,6 @@
 "use client";
 
 import { api } from "@/lib/api";
-import { demoEquity } from "@/lib/demo";
 import { fmtPctSigned, fmtUsd } from "@/lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -163,20 +162,43 @@ function pctColor(p: number, target: number, reverse = false): string {
 
 export function MonteCarloForecast() {
   const equityQ = useQuery({ queryKey: ["equity-mc"], queryFn: api.equity });
-  const real = equityQ.data ?? [];
-  const usingDemo = real.length === 0;
-  const series = usingDemo ? demoEquity().map((p) => p.total) : real.map((p) => p.total);
+  const series = (equityQ.data ?? []).map((p) => p.total);
+  const isEmpty = series.length < 30;  // can't bootstrap from fewer than ~30 returns
 
   const result = useMemo(() => {
+    if (isEmpty) return null;
     const ret = logReturns(series);
-    const last = series.at(-1) ?? 100_000;
-    // Seed from input shape so SSR/CSR match (we are client-only via dynamic import,
-    // but determinism still helps stable visual snapshots).
+    const last = series.at(-1) ?? 0;
     const rng = makeRng(series.length * 31 + Math.round(last * 11));
     return simulate(last, ret, HORIZON_DAYS, N_PATHS, rng);
-  }, [series]);
+  }, [series, isEmpty]);
 
-  const last = series.at(-1) ?? 100_000;
+  const last = series.at(-1) ?? 0;
+
+  if (isEmpty || !result) {
+    return (
+      <section className="rounded-2xl border border-border bg-surface shadow-card-soft">
+        <header className="flex items-center justify-between border-b border-border px-5 py-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold tracking-wide text-text">
+              Monte Carlo forecast
+            </h2>
+          </div>
+          <span className="font-mono text-[11px] text-text-dim">
+            block bootstrap · 1Y horizon
+          </span>
+        </header>
+        <div className="px-5 py-8 text-center">
+          <p className="font-mono text-[12px] text-text-dim">
+            need at least 30 days of equity history to forecast
+          </p>
+          <p className="mt-1 font-mono text-[10px] text-muted">
+            currently have {series.length} day{series.length === 1 ? "" : "s"}
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-2xl border border-border bg-surface shadow-card-soft">
@@ -185,11 +207,6 @@ export function MonteCarloForecast() {
           <h2 className="text-sm font-semibold tracking-wide text-text">
             Monte Carlo forecast
           </h2>
-          {usingDemo && (
-            <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
-              demo
-            </span>
-          )}
         </div>
         <span className="font-mono text-[11px] text-text-dim">
           {N_PATHS.toLocaleString()} paths · block bootstrap (k={BLOCK_SIZE}) · {HORIZON_DAYS}d

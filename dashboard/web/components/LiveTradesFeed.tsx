@@ -1,6 +1,5 @@
 "use client";
 
-import { demoTrades, type DemoTrade } from "@/lib/demo";
 import {
   fmtRelative,
   fmtTime,
@@ -14,10 +13,29 @@ import type { Trade } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-type Row = DemoTrade;
+type RowState = "open" | "closed_win" | "closed_loss" | "stopped";
 
-function StateBadge({ state }: { state: DemoTrade["state"] }) {
-  const map: Record<DemoTrade["state"], { label: string; cls: string }> = {
+type Row = {
+  id: string;
+  ts: string;
+  agent: string;
+  strategy: string;
+  symbol: string;
+  side: "buy" | "sell";
+  qty: number;
+  entry: number;
+  stop: number;
+  target: number;
+  exit: number | null;
+  pnl: number | null;
+  pnl_pct: number | null;
+  state: RowState;
+  confidence: number;
+  filter_status: string[];
+};
+
+function StateBadge({ state }: { state: RowState }) {
+  const map: Record<RowState, { label: string; cls: string }> = {
     open: { label: "open", cls: "border-info/40 bg-info/10 text-info" },
     closed_win: { label: "win", cls: "border-success/40 bg-success/10 text-success" },
     closed_loss: { label: "loss", cls: "border-danger/40 bg-danger/10 text-danger" },
@@ -33,7 +51,7 @@ function StateBadge({ state }: { state: DemoTrade["state"] }) {
   );
 }
 
-function SideBadge({ side }: { side: DemoTrade["side"] }) {
+function SideBadge({ side }: { side: "buy" | "sell" }) {
   return (
     <span
       className={`font-mono text-[10px] font-semibold uppercase tracking-wider ${
@@ -68,28 +86,22 @@ function FilterPill({ label }: { label: string }) {
 }
 
 export function LiveTradesFeed() {
-  // Try journal-derived trades first, fall back to demo when empty.
   const tradesQ = useQuery({
     queryKey: ["trades-feed"],
     queryFn: () => api.trades(),
     refetchInterval: 5_000,
   });
   const realTrades: Trade[] = tradesQ.data ?? [];
-  // Journal records from a bare-bones smoke test ("submit_dry_run" with no prices)
-  // are not useful here — fall back to demo so the operator can see what a populated
-  // feed looks like. Only show real trades when at least one has entry-price-like data.
+  // Filter to records that have enough fields to render a useful row.
+  // submit_dry_run / submit_intent records lack prices and aren't trades yet.
   const realRich = realTrades.filter(
     (t) =>
       t.symbol &&
       t.symbol !== "—" &&
-      (t.pnl != null || (t.qty ?? 0) > 0) &&
-      t.event !== "submit_dry_run",
+      t.event !== "submit_dry_run" &&
+      t.event !== "submit_intent",
   );
-  const usingDemo = realRich.length < 3;
-  const rows: Row[] = useMemo(() => (usingDemo ? demoTrades() : adaptTrades(realRich)), [
-    usingDemo,
-    realRich,
-  ]);
+  const rows: Row[] = useMemo(() => adaptTrades(realRich), [realRich]);
 
   const [filter, setFilter] = useState<"all" | "open" | "closed">("all");
   const visible = rows.filter((r) =>
@@ -101,11 +113,6 @@ export function LiveTradesFeed() {
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold tracking-wide text-text">live trades</h2>
-          {usingDemo && (
-            <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
-              demo
-            </span>
-          )}
           <span className="font-mono text-[10px] text-text-dim">
             {visible.length}/{rows.length}
           </span>

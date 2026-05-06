@@ -21,7 +21,7 @@ import json
 import logging
 import math
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -274,8 +274,9 @@ def _read_journal_signals(
     Recognises events tagged ``signal``, ``signal_emitted``, or any submit-style
     event that carries a ``confidence`` field. Returns newest-first.
     """
-    start = (since.date() if since else date.today() - timedelta(days=30))
-    events = read_events(start=start, end=date.today())
+    today_utc = datetime.now(UTC).date()
+    start = (since.date() if since else today_utc - timedelta(days=30))
+    events = read_events(start=start, end=today_utc)
     out: list[SignalRecord] = []
     for ev in events:
         kind = ev.get("event")
@@ -318,7 +319,8 @@ def _coherence_from_journal(strategy: str) -> tuple[float | None, float | None]:
 
     Returns (live_wr, backtest_wr) — both may be None.
     """
-    events = read_trades(start=date.today() - timedelta(days=90), end=date.today())
+    today = datetime.now(UTC).date()
+    events = read_trades(start=today - timedelta(days=90), end=today)
     wins = 0
     losses = 0
     for ev in events:
@@ -392,8 +394,8 @@ async def portfolio_equity(
     days: int = Query(90, ge=1, le=3650),
 ) -> PortfolioEquityResponse:
     """Joined equity curve. If agent= is provided, filter to that agent."""
-    start = date.today() - timedelta(days=days)
-    events = read_trades(start=start, end=date.today())
+    start = datetime.now(UTC).date() - timedelta(days=days)
+    events = read_trades(start=start, end=datetime.now(UTC).date())
 
     # Best-effort: walk fills, accumulate pnl into a running curve.
     points: list[EquityPoint] = []
@@ -516,13 +518,13 @@ async def altdata_insider(
 
         txns = fetch_recent_form4(tickers=[ticker], days=days)
         # Score-only against the same window.
-        score = insider_buy_score(ticker, txns, asof=date.today())
+        score = insider_buy_score(ticker, txns, asof=datetime.now(UTC).date())
 
         # Cluster / repeat flags computed from the txn set.
         from collections import Counter
 
         filer_counts = Counter(t.filer for t in txns if t.transaction_code == "P")
-        cluster_window_start = date.today() - timedelta(days=5)
+        cluster_window_start = datetime.now(UTC).date() - timedelta(days=5)
         cluster_filers = {
             t.filer
             for t in txns

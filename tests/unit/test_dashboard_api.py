@@ -155,6 +155,88 @@ def test_kill_writes_journal_intent_and_complete(tmp_path, monkeypatch):
     assert events == ["kill_intent", "kill_complete"]
 
 
+def test_bot_status_returns_stopped_initially(client, monkeypatch):
+    """GET /api/bot/status before any start returns state=stopped."""
+    from dashboard.api import runner_control as rc
+    # Reset singleton so this test gets a fresh supervisor against a tmp pidfile.
+    monkeypatch.setattr(rc, "_supervisor", None)
+    r = client.get("/api/bot/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "stopped"
+    assert body["pid"] is None
+    assert body["adopted"] is False
+
+
+def test_bot_start_requires_confirm_token(client):
+    """Empty body fails Pydantic validation (422). A wrong-string confirm
+    fails our own check (400). Either way the supervisor is not called."""
+    r = client.post("/api/bot/start", json={})
+    assert r.status_code == 422  # Pydantic validation error
+    r = client.post("/api/bot/start", json={"confirm": "yes please"})
+    assert r.status_code == 400  # our HTTPException
+
+
+def test_bot_stop_requires_confirm_token(client):
+    r = client.post("/api/bot/stop", json={})
+    assert r.status_code == 422
+    r = client.post("/api/bot/stop", json={"confirm": "GO"})
+    assert r.status_code == 400
+
+
+def test_bot_start_with_correct_token_calls_supervisor(client, monkeypatch):
+    """With the correct confirm token, /api/bot/start delegates to the
+    RunnerSupervisor. We monkeypatch the supervisor's `start` so the test
+    doesn't actually exec scripts/run_bot.py."""
+    from dashboard.api import runner_control as rc
+    from dashboard.api.runner_control import RunnerStatus
+
+    fake_status = RunnerStatus(state="running", pid=4242, started_at="2026-05-05T00:00:00+00:00")
+    calls = {"n": 0}
+
+    class _Fake:
+        def status(self):
+            return RunnerStatus(state="stopped")
+        def start(self):
+            calls["n"] += 1
+            return fake_status
+        def stop(self):
+            return RunnerStatus(state="stopped", exit_code=0)
+
+    monkeypatch.setattr(rc, "_supervisor", _Fake())
+
+    r = client.post("/api/bot/start", json={"confirm": "START"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "running"
+    assert body["pid"] == 4242
+    assert calls["n"] == 1
+
+
+def test_bot_stop_with_correct_token_calls_supervisor(client, monkeypatch):
+    from dashboard.api import runner_control as rc
+    from dashboard.api.runner_control import RunnerStatus
+
+    calls = {"n": 0}
+
+    class _Fake:
+        def status(self):
+            return RunnerStatus(state="running", pid=99)
+        def start(self):
+            return RunnerStatus(state="running", pid=99)
+        def stop(self):
+            calls["n"] += 1
+            return RunnerStatus(state="stopped", exit_code=0)
+
+    monkeypatch.setattr(rc, "_supervisor", _Fake())
+
+    r = client.post("/api/bot/stop", json={"confirm": "STOP"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "stopped"
+    assert calls["n"] == 1
+
+
 def test_kill_refuses_with_live_trading_set(tmp_path, monkeypatch):
     """Hard guard: even though BrokerProxy is paper-only, refuse to run if
     LIVE_TRADING=1 is in the environment. Defense in depth."""

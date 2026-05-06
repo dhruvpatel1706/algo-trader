@@ -11,6 +11,9 @@ Routes:
   GET  /api/costs                  — LLM token + API request counter
   GET  /api/agent-events           — recent agent activity (ring buffer)
   GET  /api/incidents              — past kill incidents
+  GET  /api/bot/status             — runner state, pid, uptime, log tail
+  POST /api/bot/start              — spawn scripts/run_bot.py
+  POST /api/bot/stop               — SIGTERM (then SIGKILL after grace) the runner
   POST /api/strategies/{name}/pause
   POST /api/strategies/{name}/resume
   POST /api/halt/reset             — clear a manual halt
@@ -38,6 +41,11 @@ from dashboard.api.dashboard_metrics import trailing_metrics
 from dashboard.api.journal_reader import read_trades
 from dashboard.api.kill import execute_kill, list_incidents
 from dashboard.api.multi_agent import router as multi_agent_router
+from dashboard.api.runner_control import (
+    RunnerSupervisor,
+    get_supervisor,
+    status_to_dict,
+)
 from dashboard.api.state import DashboardState, get_state
 
 log = logging.getLogger(__name__)
@@ -72,11 +80,51 @@ class CostBump(BaseModel):
 
 _StateDep = Annotated[DashboardState, Depends(get_state)]
 _BrokerDep = Annotated[BrokerProxy, Depends(get_broker_proxy)]
+_SupervisorDep = Annotated[RunnerSupervisor, Depends(get_supervisor)]
 
 
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True, "service": "algo-trader-dashboard"}
+
+
+# -- Runner control (Start/Stop bot from the UI) ---------------------------
+#
+# ``GET /api/bot/status`` is unauthenticated (read-only). The mutating
+# endpoints (start/stop) require a confirm-token body — same defense in
+# depth as ``/api/kill``. The token is intentionally simple ("START"/"STOP"
+# strings) because the FastAPI port should not be reachable beyond
+# localhost in v1; the token closes the "malicious local subprocess can
+# spawn the runner via fetch" hole without dragging in a full auth stack.
+
+
+class BotActionRequest(BaseModel):
+    confirm: str = Field(..., description='must equal "START" or "STOP"')
+
+
+@app.get("/api/bot/status")
+def bot_status(supervisor: _SupervisorDep) -> dict:
+    return status_to_dict(supervisor.status())
+
+
+@app.post("/api/bot/start")
+def bot_start(supervisor: _SupervisorDep, body: BotActionRequest) -> dict:
+    if body.confirm != "START":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='must POST {"confirm": "START"} to start the bot',
+        )
+    return status_to_dict(supervisor.start())
+
+
+@app.post("/api/bot/stop")
+def bot_stop(supervisor: _SupervisorDep, body: BotActionRequest) -> dict:
+    if body.confirm != "STOP":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='must POST {"confirm": "STOP"} to stop the bot',
+        )
+    return status_to_dict(supervisor.stop())
 
 
 @app.get("/api/portfolio")

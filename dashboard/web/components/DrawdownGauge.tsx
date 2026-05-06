@@ -1,24 +1,21 @@
 "use client";
 import { api } from "@/lib/api";
-import { demoEquity } from "@/lib/demo";
 import type { EquityPoint } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 /**
  * Computes current drawdown from /api/portfolio/equity series and shows a
- * horizontal bar gauge. Falls back to "no data yet" when series is empty.
+ * horizontal bar gauge. Renders an empty state when the equity history is
+ * empty rather than fabricating a demo curve.
  */
 export function DrawdownGauge({
   warnAt = 0.05,
   haltAt = 0.1,
 }: { warnAt?: number; haltAt?: number } = {}) {
   const equity = useQuery({ queryKey: ["equity"], queryFn: api.equity });
-  const real: EquityPoint[] = equity.data ?? [];
-  const usingDemo = real.length === 0;
-  const series: EquityPoint[] = usingDemo
-    ? demoEquity().map((d) => ({ ts: d.ts, total: d.total, drawdown: d.drawdown }))
-    : real;
+  const series: EquityPoint[] = equity.data ?? [];
+  const isEmpty = series.length === 0;
 
   const { dd, peak, last } = useMemo(() => {
     if (series.length === 0) return { dd: 0, peak: 0, last: 0 };
@@ -39,14 +36,11 @@ export function DrawdownGauge({
     <div className="rounded-2xl border border-border bg-surface p-5 shadow-card-soft">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-wide text-text">drawdown</h2>
-        {usingDemo && (
-          <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-warn">
-            demo
-          </span>
-        )}
       </div>
-      {series.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted">no data yet</p>
+      {isEmpty ? (
+        <p className="py-6 text-center font-mono text-[11px] text-muted">
+          no equity history — start the bot to populate
+        </p>
       ) : (
         <>
           <div className="mb-2 flex items-baseline justify-between">

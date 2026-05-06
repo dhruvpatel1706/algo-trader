@@ -116,6 +116,13 @@ ignore = ["S101", "PLR0913", "PLR2004", "S311", "PLR0911", "S104"]
 # Singletons + lazy alpaca imports inside dashboard helpers are intentional.
 "dashboard/api/broker_proxy.py" = ["PLC0415", "PLW0603"]
 "dashboard/api/state.py" = ["PLW0603"]
+# Module-level singleton supervisor + adopt-orphan recovery use a global.
+"dashboard/api/runner_control.py" = ["PLW0603"]
+# LLM router: lazy provider SDK imports are deliberate (one missing SDK must
+# not break callers that route to other providers); the leading-underscore
+# exception classes are private taxonomy not exposed in the public API; the
+# multiplication-sign typography in the docstring is intentional.
+"src/llm/router.py" = ["PLC0415", "PLW0603", "N818", "RUF002"]
 # Integration tests legitimately shell out via subprocess.
 "tests/integration/**" = ["S603", "S607", "PLW1510"]
 
