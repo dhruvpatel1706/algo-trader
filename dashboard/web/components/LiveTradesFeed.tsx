@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import type { Trade } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { TradeExportButton } from "./TradeExportButton";
 
 type RowState = "open" | "closed_win" | "closed_loss" | "stopped";
 
@@ -117,21 +118,24 @@ export function LiveTradesFeed() {
             {visible.length}/{rows.length}
           </span>
         </div>
-        <div className="flex gap-1 rounded-md border border-border bg-bg p-0.5">
-          {(["all", "open", "closed"] as const).map((k) => (
-            <button
-              type="button"
-              key={k}
-              onClick={() => setFilter(k)}
-              className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition ${
-                filter === k
-                  ? "bg-surface-2 text-text shadow-card-soft"
-                  : "text-text-dim hover:text-text"
-              }`}
-            >
-              {k}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 rounded-md border border-border bg-bg p-0.5">
+            {(["all", "open", "closed"] as const).map((k) => (
+              <button
+                type="button"
+                key={k}
+                onClick={() => setFilter(k)}
+                className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition ${
+                  filter === k
+                    ? "bg-surface-2 text-text shadow-card-soft"
+                    : "text-text-dim hover:text-text"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <TradeExportButton />
         </div>
       </header>
       <div className="max-h-[480px] overflow-x-auto overflow-y-auto">
