@@ -41,6 +41,7 @@ from dashboard.api.dashboard_metrics import trailing_metrics
 from dashboard.api.journal_reader import read_trades
 from dashboard.api.kill import execute_kill, list_incidents
 from dashboard.api.multi_agent import router as multi_agent_router
+from dashboard.api.refusal_endpoints import router as refusal_router
 from dashboard.api.runner_control import (
     RunnerSupervisor,
     get_supervisor,
@@ -64,6 +65,8 @@ app.add_middleware(
 
 # Multi-agent dashboard endpoints (per-agent status, alt-data, moonshot lanes).
 app.include_router(multi_agent_router)
+# Refusal events: first-class observability for declined trades.
+app.include_router(refusal_router)
 
 
 class KillRequest(BaseModel):
