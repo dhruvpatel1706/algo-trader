@@ -417,6 +417,25 @@ async def portfolio_equity(
         running += by_day[day]
         points.append(EquityPoint(ts=f"{day}T00:00:00+00:00", equity=running))
 
+    # Fallback: when the journal-derived curve is empty AND the caller is
+    # asking for the joined view (no per-agent filter), pull Alpaca's
+    # server-side daily equity snapshots so the chart shows a real line
+    # instead of an empty state. Alpaca doesn't know about our agent
+    # partitioning, so per-agent views never use this fallback.
+    if not points and agent is None:
+        try:
+            from dashboard.api.broker_proxy import get_broker_proxy
+            broker = get_broker_proxy()
+            history = broker.get_portfolio_history(days=days)
+        except Exception as exc:  # defensive: never crash the dashboard
+            log.debug("alpaca portfolio_history fallback failed: %s", exc)
+            history = None
+        if history:
+            points = [
+                EquityPoint(ts=h["ts"], equity=float(h["equity"]))
+                for h in history
+            ]
+
     return PortfolioEquityResponse(
         agent=agent,
         days=days,

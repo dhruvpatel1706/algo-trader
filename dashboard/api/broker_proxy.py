@@ -5,11 +5,16 @@ Reads are cached for ~3s to avoid rate limiting under dashboard polling.
 
 from __future__ import annotations
 
+import logging
+import math
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config import get_settings
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -113,6 +118,77 @@ class BrokerProxy:
             ]
 
         return self._cached(f"orders:{status}:{limit}", fetch)
+
+    @staticmethod
+    def _period_for_days(days: int) -> str:
+        """Map our ``days`` query param to the closest Alpaca ``period`` bucket.
+
+        Alpaca's bucketing is fixed (1D/1W/1M/3M/1A/all); we pick the
+        smallest bucket that covers ``days``.
+        """
+        if days <= 1:
+            return "1D"
+        if days <= 7:
+            return "1W"
+        if days <= 30:
+            return "1M"
+        if days <= 90:
+            return "3M"
+        if days <= 365:
+            return "1A"
+        return "all"
+
+    def get_portfolio_history(self, *, days: int = 90) -> list[dict] | None:
+        """Fetch Alpaca's server-side equity history.
+
+        Returns a list of {ts, equity} dicts in chronological order, or None
+        if the broker is not configured / the call failed (caller should
+        fall back to the empty list cleanly).
+
+        The mapping from ``days`` to Alpaca's ``period`` parameter is approximate
+        — Alpaca's bucketing is fixed (1D/1W/1M/3M/1A/all); we pick the
+        smallest bucket that covers ``days``.
+        """
+        client = self._get_client()
+        if client is None:
+            return None
+        period = self._period_for_days(days)
+        try:
+            from alpaca.trading.requests import (
+                GetPortfolioHistoryRequest,
+            )
+
+            req = GetPortfolioHistoryRequest(period=period, timeframe="1D")
+            history = client.get_portfolio_history(history_filter=req)
+        except TypeError:
+            # Older alpaca-py versions accept positional/keyword args differently.
+            try:
+                history = client.get_portfolio_history(period=period, timeframe="1D")
+            except Exception as exc:  # pragma: no cover - defensive
+                log.debug("alpaca get_portfolio_history failed: %s", exc)
+                return None
+        except Exception as exc:
+            log.debug("alpaca get_portfolio_history failed: %s", exc)
+            return None
+
+        timestamps = getattr(history, "timestamp", None) or []
+        equities = getattr(history, "equity", None) or []
+        out: list[dict] = []
+        for ts, eq in zip(timestamps, equities, strict=False):
+            if eq is None:
+                continue
+            try:
+                eq_f = float(eq)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(eq_f):
+                continue
+            try:
+                ts_iso = datetime.fromtimestamp(int(ts), tz=UTC).isoformat()
+            except (TypeError, ValueError, OSError):
+                continue
+            out.append({"ts": ts_iso, "equity": eq_f})
+        return out
 
     def cancel_all_orders(self) -> list[str] | None:
         client = self._get_client()
