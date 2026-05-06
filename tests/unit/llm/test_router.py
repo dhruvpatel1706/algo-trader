@@ -119,11 +119,16 @@ def test_router_raises_when_all_providers_fail(monkeypatch):
             Router(chain=chain).call(system="s", user="u")
 
 
-def test_default_chain_is_haiku_then_gemini_then_openai():
-    """Pinning the order — accidentally reordering this changes cost + latency."""
-    assert [s.provider for s in DEFAULT_CHAIN] == ["anthropic", "gemini", "openai"]
-    assert DEFAULT_CHAIN[0].model.startswith("claude-haiku")
-    assert "gemini" in DEFAULT_CHAIN[1].model
+def test_default_chain_is_gemini_then_haiku_then_openai():
+    """Pinning the order — accidentally reordering this changes cost + latency.
+
+    Gemini leads because the AI Studio free tier covers our paper-trading
+    volume at $0/month; Anthropic Haiku and OpenAI mini are paid fallbacks
+    for cross-vendor resilience.
+    """
+    assert [s.provider for s in DEFAULT_CHAIN] == ["gemini", "anthropic", "openai"]
+    assert "gemini" in DEFAULT_CHAIN[0].model
+    assert DEFAULT_CHAIN[1].model.startswith("claude-haiku")
     assert DEFAULT_CHAIN[2].model.startswith("gpt-")
 
 

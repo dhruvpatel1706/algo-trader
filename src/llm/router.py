@@ -72,16 +72,27 @@ class LLMUnavailableError(RuntimeError):
 
 
 # Default fallback chain — all "fast & cheap" tier.
+#
+# Order is Gemini → Anthropic → OpenAI:
+#   1. Gemini Flash 2.5 leads because the AI Studio free tier (15 RPM,
+#      1M tokens/day) is enough to cover our paper-trading volume at
+#      $0/month. Operators without paid LLM credits should still get a
+#      working autonomous reasoner.
+#   2. Anthropic Haiku 4.5 is the paid fallback — picks up if Gemini
+#      hits the rate limit or has a regional outage.
+#   3. OpenAI gpt-4.1-mini is the third leg for resilience across
+#      vendors. Different infra again so a coincident multi-vendor
+#      outage is unlikely to take this leg out too.
 DEFAULT_CHAIN: tuple[ModelSpec, ...] = (
-    ModelSpec(
-        provider="anthropic",
-        model="claude-haiku-4-5-20251001",
-        api_key_env="ANTHROPIC_API_KEY",
-    ),
     ModelSpec(
         provider="gemini",
         model="gemini-2.5-flash",
         api_key_env="GEMINI_API_KEY",
+    ),
+    ModelSpec(
+        provider="anthropic",
+        model="claude-haiku-4-5-20251001",
+        api_key_env="ANTHROPIC_API_KEY",
     ),
     ModelSpec(
         provider="openai",
