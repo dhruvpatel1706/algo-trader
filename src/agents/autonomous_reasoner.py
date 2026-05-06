@@ -53,6 +53,12 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from src.llm import LLMUnavailableError, call_llm
+from src.runtime.market_phase import (
+    AssetClass,
+    MarketPhase,
+    current_phase,
+    phase_posture,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +100,12 @@ class SignalContext:
     insider_score: float | None = None          # 0..1 if we have Form 4 data
     news_headlines: list[str] = field(default_factory=list)
     open_positions: list[str] = field(default_factory=list)  # ticker symbols
+    # Microstructure phase ("pre_market" / "open" / "midday" / "close" / etc.).
+    # When None, the reasoner auto-resolves via current_phase() at eval time.
+    # Populating this lets the LLM adopt phase-appropriate posture (more
+    # cautious in the first 30min after open, more permissive midday).
+    phase: MarketPhase | None = None
+    asset_class: AssetClass = "equity"          # used only for phase auto-resolve
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,44 +167,57 @@ class AutonomousReasoner:
 
         Never raises. LLM-unavailable returns the identity judgment
         (multiplier=1.0, halt=False, fail_open=True) so the rule-based
-        pipeline runs unmodified during outages.
+        pipeline runs unmodified during outages. Any unexpected exception
+        in the parsing / journaling layer also degrades to the identity
+        judgment — the bot must never be stopped by a reasoner bug.
         """
         started = datetime.now(UTC)
         if not self.enabled:
             return self._identity(started, "reasoner disabled")
 
-        anon_ctx, aliases = _anonymize_context(ctx)
-        user_prompt = _build_user_prompt(anon_ctx)
-
         try:
-            resp = call_llm(
-                system=_SYSTEM_PROMPT,
-                user=user_prompt,
-                max_tokens=self.model_max_tokens,
-                temperature=0.0,
+            anon_ctx, aliases = _anonymize_context(ctx)
+            user_prompt = _build_user_prompt(anon_ctx)
+
+            try:
+                resp = call_llm(
+                    system=_SYSTEM_PROMPT,
+                    user=user_prompt,
+                    max_tokens=self.model_max_tokens,
+                    temperature=0.0,
+                )
+            except LLMUnavailableError as e:
+                logger.warning("autonomous_reasoner: LLM unavailable, fail-open: %s", e)
+                judgment = self._identity(started, f"LLM unavailable ({e!s})")
+                self._journal(ctx, judgment, raw_response=None)
+                return judgment
+
+            multiplier, halt, reasoning = _parse_verdict(resp.text)
+            # De-anonymize the reasoning so the journal shows real tickers.
+            for placeholder, original in aliases.items():
+                reasoning = reasoning.replace(placeholder, original)
+
+            elapsed = int((datetime.now(UTC) - started).total_seconds() * 1000)
+            judgment = SignalJudgment(
+                multiplier=_clamp(multiplier),
+                halt=bool(halt),
+                reasoning=reasoning,
+                provider=resp.provider,
+                elapsed_ms=elapsed,
+                asof=started.isoformat(),
             )
-        except LLMUnavailableError as e:
-            logger.warning("autonomous_reasoner: LLM unavailable, fail-open: %s", e)
-            judgment = self._identity(started, f"LLM unavailable ({e!s})")
+            self._journal(ctx, judgment, raw_response=resp.text)
+            return judgment
+        except Exception as e:
+            # Last-resort guard: the docstring promises "Never raises". A bug
+            # in parsing / aliasing / journaling here must not crash the
+            # strategy loop. Log the full traceback once and return identity.
+            logger.exception(
+                "autonomous_reasoner: unexpected error in evaluate, fail-open"
+            )
+            judgment = self._identity(started, f"reasoner error ({type(e).__name__})")
             self._journal(ctx, judgment, raw_response=None)
             return judgment
-
-        multiplier, halt, reasoning = _parse_verdict(resp.text)
-        # De-anonymize the reasoning so the journal shows real tickers.
-        for placeholder, original in aliases.items():
-            reasoning = reasoning.replace(placeholder, original)
-
-        elapsed = int((datetime.now(UTC) - started).total_seconds() * 1000)
-        judgment = SignalJudgment(
-            multiplier=_clamp(multiplier),
-            halt=bool(halt),
-            reasoning=reasoning,
-            provider=resp.provider,
-            elapsed_ms=elapsed,
-            asof=started.isoformat(),
-        )
-        self._journal(ctx, judgment, raw_response=resp.text)
-        return judgment
 
     # -- helpers -----------------------------------------------------------
 
@@ -282,6 +307,10 @@ def _anonymize_context(ctx: SignalContext) -> tuple[SignalContext, dict[str, str
 def _build_user_prompt(ctx: SignalContext) -> str:
     """Render the context as deterministic JSON. Stable shape -> stable
     prompts -> better LLM behavior across providers."""
+    # Auto-resolve the microstructure phase if the caller didn't pass one.
+    # Keeping this lazy means SignalContext can stay a frozen dataclass and
+    # callers don't need to compute the phase themselves.
+    phase = ctx.phase or current_phase(datetime.now(UTC), ctx.asset_class)
     payload = {
         "candidate_signal": {
             "symbol": ctx.symbol,
@@ -299,6 +328,10 @@ def _build_user_prompt(ctx: SignalContext) -> str:
             "open_positions": ctx.open_positions,
             "recent_bars_count": len(ctx.recent_bars),
         },
+        "market_phase": {
+            "phase": phase,
+            "posture": phase_posture(phase),
+        },
     }
     return json.dumps(payload, default=str)
 
@@ -309,10 +342,17 @@ def _parse_verdict(raw: str) -> tuple[float, bool, str]:
     text = raw.strip()
     if text.startswith("```"):
         # Strip ```json ... ``` if the LLM wrapped despite instructions.
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
-            text = text[4:].lstrip()
-        text = text.rsplit("```", 1)[0].strip()
+        # Defensive against truncated / malformed fences (LLM hit max_tokens
+        # mid-response, network drop) — fall through to identity rather than
+        # let an IndexError or attribute lookup crash the agent loop.
+        try:
+            parts = text.split("```", 2)
+            text = parts[1] if len(parts) >= 2 else parts[0]
+            if text.startswith("json"):
+                text = text[4:].lstrip()
+            text = text.rsplit("```", 1)[0].strip()
+        except (IndexError, ValueError, AttributeError):
+            return 1.0, False, "fence parse failed; defaulting to identity"
     try:
         obj = json.loads(text)
     except json.JSONDecodeError:

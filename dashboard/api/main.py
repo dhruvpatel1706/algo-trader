@@ -168,15 +168,36 @@ def strategies(state: _StateDep) -> list[dict]:
     return state.list_strategies()
 
 
+class StrategyMutationRequest(BaseModel):
+    confirm: str = Field(..., description='must equal "PAUSE" or "RESUME"')
+
+
+class HaltResetRequest(BaseModel):
+    confirm: str = Field(..., description='must equal "RESET"')
+
+
 @app.post("/api/strategies/{name}/pause")
-def pause_strategy(name: str, state: _StateDep) -> dict:
+def pause_strategy(name: str, state: _StateDep, body: StrategyMutationRequest) -> dict:
+    # Defense in depth: a localhost-bound process (browser tab, dev tool) must
+    # not be able to silently flip a strategy's run state. Same confirm-token
+    # pattern as /api/bot/start and /api/kill.
+    if body.confirm != "PAUSE":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            'must POST {"confirm": "PAUSE"} to pause a strategy',
+        )
     if not state.pause(name):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"strategy '{name}' not found")
     return {"name": name, "enabled": False}
 
 
 @app.post("/api/strategies/{name}/resume")
-def resume_strategy(name: str, state: _StateDep) -> dict:
+def resume_strategy(name: str, state: _StateDep, body: StrategyMutationRequest) -> dict:
+    if body.confirm != "RESUME":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            'must POST {"confirm": "RESUME"} to resume a strategy',
+        )
     if not state.resume(name):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"strategy '{name}' not found")
     return {"name": name, "enabled": True}
@@ -188,7 +209,15 @@ def halt(state: _StateDep) -> dict:
 
 
 @app.post("/api/halt/reset")
-def halt_reset(state: _StateDep) -> dict:
+def halt_reset(state: _StateDep, body: HaltResetRequest) -> dict:
+    # Halts are operator-set safety brakes; clearing one without an explicit
+    # confirm token means any process that can reach the listener (stale tab,
+    # local extension) could silently re-enable trading.
+    if body.confirm != "RESET":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            'must POST {"confirm": "RESET"} to clear the halt',
+        )
     state.reset_halt()
     return state.halt_status()
 

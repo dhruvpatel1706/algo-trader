@@ -41,8 +41,10 @@ def read_events(
     event_filter: tuple[str, ...] = (),
 ) -> list[dict]:
     """Read all journal events between `start` and `end` (inclusive). UTC dates."""
-    start = start or date.today() - timedelta(days=30)
-    end = end or date.today()
+    # JournalWriter strftime's filename in UTC; defaults must match.
+    today_utc = datetime.now(UTC).date()
+    start = start or today_utc - timedelta(days=30)
+    end = end or today_utc
     out: list[dict] = []
     for d in _iter_dates(start, end):
         for event in _read_journal_for(d):

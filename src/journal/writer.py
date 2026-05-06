@@ -64,9 +64,13 @@ class JournalWriter:
             event = {**event, "ts": datetime.now(UTC).isoformat()}
         record = redact(event)
         path = self.path_for()
+        # Single write call: the JSON body and trailing newline travel in one
+        # syscall. A two-syscall write could fail between the body and the
+        # newline on a full disk, leaving the file ending mid-line and
+        # corrupting the next append (record-on-record concatenation).
+        line = json.dumps(record, separators=(",", ":"), default=str) + "\n"
         with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, separators=(",", ":"), default=str))
-            f.write("\n")
+            f.write(line)
             f.flush()
             os.fsync(f.fileno())
         return path

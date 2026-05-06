@@ -11,6 +11,15 @@ from src.execution.orders import Order, Submission, utcnow
 from src.risk.limits import Decision
 
 
+class BrokerSubmitError(RuntimeError):
+    """Raised when the broker rejects or fails to accept an order.
+
+    Distinct from PermissionError (gate violation) and ValueError (bad input)
+    so the runner can branch on broker-vs-pipeline failures: a broker outage
+    pauses signal placement; a gate violation is a code/config bug.
+    """
+
+
 class _AlpacaTradingClient(Protocol):
     """Minimal protocol for the alpaca-py TradingClient surface we use.
 
@@ -86,12 +95,27 @@ class PaperBroker:
         )
 
     def submit(self, order: Order, token: ApprovalToken) -> Submission:
-        """Submit an order. Requires both-gate approval token."""
+        """Submit an order. Requires both-gate approval token.
+
+        Wraps the Alpaca call in a typed BrokerSubmitError so the runner can
+        catch broker outages / rate-limits / 4xx rejections without crashing
+        the entire strategy evaluation cycle. Idempotency is provided by the
+        caller-supplied ``client_order_id`` — Alpaca rejects duplicates.
+        """
         if not token.risk_reason or not token.compliance_reason:
             raise PermissionError("ApprovalToken missing gate reason")
 
         request = self._build_request(order)
-        result = self._client.submit_order(order_data=request)
+        try:
+            result = self._client.submit_order(order_data=request)
+        except Exception as e:
+            # Catch-all because alpaca-py raises a wide taxonomy
+            # (APIError, RetryError, requests.RequestException, OSError); we
+            # let the runner decide whether to retry or skip the cycle.
+            raise BrokerSubmitError(
+                f"alpaca submit_order failed for {order.symbol} {order.side} "
+                f"qty={order.qty} ({type(e).__name__}: {e})"
+            ) from e
 
         return Submission(
             broker_order_id=str(getattr(result, "id", "")),

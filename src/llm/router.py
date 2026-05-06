@@ -46,7 +46,12 @@ class ModelSpec:
     api_key_env: str
     # Whether this provider's failure should be retried with backoff before
     # falling through to the next. Keep small — fallback is the strategy.
-    max_retries: int = 1
+    # Default 0: the fallback CHAIN is the retry strategy. A retry inside the
+    # trade-decision loop blocks the agent for backoff_sec * 2^attempt seconds
+    # per signal during a provider outage; with 20 candidate signals that
+    # compounds. Callers who genuinely want in-provider retries (e.g. an
+    # offline backtest pass) can override per-spec.
+    max_retries: int = 0
     backoff_sec: float = 0.5
 
 

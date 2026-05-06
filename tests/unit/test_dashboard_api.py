@@ -48,18 +48,26 @@ def test_strategies_default(client):
 
 
 def test_pause_resume(client):
-    r = client.post("/api/strategies/mr_etf/pause")
+    r = client.post("/api/strategies/mr_etf/pause", json={"confirm": "PAUSE"})
     assert r.status_code == 200
     assert r.json()["enabled"] is False
     r = client.get("/api/strategies")
     mr = next(s for s in r.json() if s["name"] == "mr_etf")
     assert mr["enabled"] is False
-    r = client.post("/api/strategies/mr_etf/resume")
+    r = client.post("/api/strategies/mr_etf/resume", json={"confirm": "RESUME"})
     assert r.json()["enabled"] is True
 
 
+def test_pause_requires_confirm_token(client):
+    # Defense in depth: a missing/wrong confirm token must reject.
+    r = client.post("/api/strategies/mr_etf/pause", json={"confirm": "nope"})
+    assert r.status_code == 400
+    r = client.post("/api/strategies/mr_etf/resume", json={"confirm": "nope"})
+    assert r.status_code == 400
+
+
 def test_pause_unknown_strategy(client):
-    r = client.post("/api/strategies/does_not_exist/pause")
+    r = client.post("/api/strategies/does_not_exist/pause", json={"confirm": "PAUSE"})
     assert r.status_code == 404
 
 
@@ -75,7 +83,20 @@ def test_halt_status_and_reset(client):
 
     get_state().halt("manual test")
     assert client.get("/api/halt").json()["halted"] is True
-    r = client.post("/api/halt/reset")
+    r = client.post("/api/halt/reset", json={"confirm": "RESET"})
+    assert r.json()["halted"] is False
+
+
+def test_halt_reset_requires_confirm_token(client):
+    from dashboard.api.state import get_state
+
+    get_state().halt("manual test")
+    # Without confirm, must 400 — the halt is a manual safety brake.
+    r = client.post("/api/halt/reset", json={"confirm": "wrong"})
+    assert r.status_code == 400
+    assert client.get("/api/halt").json()["halted"] is True
+    # Cleanup
+    r = client.post("/api/halt/reset", json={"confirm": "RESET"})
     assert r.json()["halted"] is False
 
 

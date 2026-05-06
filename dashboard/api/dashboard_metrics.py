@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from dashboard.api.journal_reader import read_trades
@@ -19,7 +19,9 @@ def _trade_pnl(event: dict[str, Any]) -> float | None:
 
 
 def _split_periods() -> dict[str, tuple[date, date]]:
-    today = date.today()
+    # JournalWriter keys files by UTC date; compare on UTC so a PT operator
+    # at 9:30am doesn't see "today" empty for the first 8 hours each day.
+    today = datetime.now(UTC).date()
     return {
         "30d": (today - timedelta(days=30), today),
         "90d": (today - timedelta(days=90), today),
