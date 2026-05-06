@@ -280,9 +280,14 @@ class BarsCache:
 
             loader = load_daily_bars  # type: ignore[assignment]
 
-        now = self._clock()
-        start = now - timedelta(days=self._equity_lookback_days)
-        self._invoke_and_store(asset_class, symbols, loader, (symbols, start, now))
+        # ``load_daily_bars`` and ``load_crypto_bars`` are both ``date``-typed
+        # (their internal cache-coverage checks compare via ``date.__le__``);
+        # passing ``datetime`` raises ``TypeError`` deep in pandas. Convert
+        # at the boundary so the cache always speaks the loader's API.
+        now_dt = self._clock()
+        end_d = now_dt.date()
+        start_d = end_d - timedelta(days=self._equity_lookback_days)
+        self._invoke_and_store(asset_class, symbols, loader, (symbols, start_d, end_d))
 
     def _refresh_crypto(self, asset_class: AssetClass, symbols: list[str]) -> None:
         """Fetch ``symbols`` via the crypto loader and merge into cache."""
@@ -293,11 +298,12 @@ class BarsCache:
 
             loader = load_crypto_bars  # type: ignore[assignment]
 
-        now = self._clock()
-        start = now - timedelta(days=self._crypto_lookback_days)
+        now_dt = self._clock()
+        end_d = now_dt.date()
+        start_d = end_d - timedelta(days=self._crypto_lookback_days)
         # The crypto loader takes an extra ``interval`` argument; we pin
         # to daily bars here so the cache contract is uniform.
-        self._invoke_and_store(asset_class, symbols, loader, (symbols, start, now, "1d"))
+        self._invoke_and_store(asset_class, symbols, loader, (symbols, start_d, end_d, "1d"))
 
     def _invoke_and_store(
         self,

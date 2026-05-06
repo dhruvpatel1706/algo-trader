@@ -161,6 +161,9 @@ class Runner:
         self,
         agents: dict[str, Agent],
         journal_writer: Any,  # JournalWriter, but kept loose for testability
+        *,
+        bars_cache: Any = None,        # `BarsCache | None` — when supplied, real data refresh
+        trade_pipeline: Any = None,    # `TradePipeline | None` — when supplied, real signal flow
     ) -> None:
         """Wire up the default job calendar from the multi-asset plan.
 
@@ -172,6 +175,7 @@ class Runner:
         - ``crypto_agent.eval``     - every 15 min, 24/7
         - ``governance_agent.eval`` - hourly
         - ``data_refresh``          - every 60s during equity hours
+        - ``crypto_data_refresh``   - every 5 min, 24/7 (only with bars_cache)
         - ``position_reconcile``    - every 30s
         - ``eod_summary``           - 16:05 ET daily
         - ``nightly_backtest``      - 23:00 ET daily
@@ -182,36 +186,106 @@ class Runner:
 
         Jobs whose agent is missing from ``agents`` are skipped silently;
         this lets early bring-up wire only what's ready.
+
+        When BOTH ``bars_cache`` and ``trade_pipeline`` are supplied, the
+        agent eval jobs run the real pipeline: refresh bars if stale,
+        evaluate strategies, route signals through the reasoner + risk
+        gate, submit approved orders to the broker, journal the report.
+        When either is None, the eval lambdas fall back to the legacy
+        no-op stub (``agent.evaluate({})``) so existing tests + the dry
+        bring-up path keep working.
         """
-        # --- Per-asset agent eval jobs ------------------------------------
-        equity = agents.get("equity")
-        if equity is not None:
+        live_pipeline = bars_cache is not None and trade_pipeline is not None
+
+        self._register_agent_evals(
+            agents,
+            journal_writer=journal_writer,
+            bars_cache=bars_cache,
+            trade_pipeline=trade_pipeline,
+            live_pipeline=live_pipeline,
+        )
+        self._register_data_refresh_jobs(
+            agents,
+            journal_writer=journal_writer,
+            bars_cache=bars_cache,
+            live_pipeline=live_pipeline,
+        )
+        self._register_operational_jobs(journal_writer=journal_writer)
+
+    # -- helpers for add_default_jobs --------------------------------------
+
+    def _register_agent_evals(
+        self,
+        agents: dict[str, Agent],
+        *,
+        journal_writer: Any,
+        bars_cache: Any,
+        trade_pipeline: Any,
+        live_pipeline: bool,
+    ) -> None:
+        """Register the per-asset agent eval jobs.
+
+        Builds the per-agent eval closure (live pipeline when both cache +
+        pipeline are wired, no-op stub otherwise) and registers each agent
+        on its own cadence + market-hours gate.
+        """
+
+        def _make_eval(agent: Agent) -> Callable[[], Any]:
+            if not live_pipeline:
+                return lambda a=agent: a.evaluate({})
+
+            def _run() -> Any:
+                try:
+                    if bars_cache.is_stale_for(agent.asset_class):
+                        bars_cache.refresh(agent.asset_class, agent.universe)
+                except Exception:
+                    log.exception(
+                        "%s eval: bars refresh failed; using whatever's cached",
+                        agent.name,
+                    )
+                bars = bars_cache.get_for(agent.universe)
+                report = trade_pipeline.run_for(agent, bars)
+                # Journal a compact summary so the dashboard sees activity
+                # even when no signals fired (n_signals == 0 is normal).
+                try:
+                    journal_writer.write(
+                        {
+                            "event": "agent_eval_complete",
+                            "agent": agent.name,
+                            "n_signals": report.n_signals,
+                            "n_submitted": report.n_submitted,
+                            "n_refused": report.n_refused,
+                            "n_bars_cached": len(bars),
+                        }
+                    )
+                except Exception:
+                    log.warning("%s eval: post-eval journal write failed", agent.name)
+                return report
+
+            _run.__name__ = f"{agent.name}_eval_pipeline"
+            return _run
+
+        # NYSE-gated equity-class agents (5-min cadence).
+        for name in ("equity", "gold", "bonds"):
+            agent = agents.get(name)
+            if agent is None:
+                continue
             self.register(
-                "equity_agent.eval",
-                _gate_market_hours("equity", lambda a=equity: a.evaluate({})),
+                f"{name}_agent.eval",
+                _gate_market_hours(name, _make_eval(agent)),
                 IntervalTrigger(minutes=5),
             )
-        gold = agents.get("gold")
-        if gold is not None:
-            self.register(
-                "gold_agent.eval",
-                _gate_market_hours("gold", lambda a=gold: a.evaluate({})),
-                IntervalTrigger(minutes=5),
-            )
-        bonds = agents.get("bonds")
-        if bonds is not None:
-            self.register(
-                "bonds_agent.eval",
-                _gate_market_hours("bonds", lambda a=bonds: a.evaluate({})),
-                IntervalTrigger(minutes=5),
-            )
+
+        # 24/7 crypto, 15-min cadence.
         crypto = agents.get("crypto")
         if crypto is not None:
             self.register(
                 "crypto_agent.eval",
-                lambda a=crypto: a.evaluate({}),
+                _make_eval(crypto),
                 IntervalTrigger(minutes=15),
             )
+
+        # Governance agent never trades; runs hourly via legacy stub path.
         governance = agents.get("governance")
         if governance is not None:
             self.register(
@@ -220,17 +294,69 @@ class Runner:
                 IntervalTrigger(hours=1),
             )
 
-        # --- Operational jobs --------------------------------------------
-        # data_refresh is gated to equity hours (the equity universe drives
-        # the cadence; crypto agents fetch on their own schedule).
-        self.register(
-            "data_refresh",
-            _gate_market_hours(
-                "equity",
-                lambda jw=journal_writer: jw.write({"event": "data_refresh"}),
-            ),
-            IntervalTrigger(seconds=60),
-        )
+    def _register_data_refresh_jobs(
+        self,
+        agents: dict[str, Agent],
+        *,
+        journal_writer: Any,
+        bars_cache: Any,
+        live_pipeline: bool,
+    ) -> None:
+        """Register the data-refresh jobs.
+
+        With a live pipeline, drives equity-class cache warming + a 24/7
+        crypto cache refresh. Without a pipeline, falls back to the legacy
+        journal-only stub on the equity-hours cadence.
+        """
+        if live_pipeline:
+
+            def _equity_refresh() -> None:
+                for cls_name in ("equity", "gold", "bonds"):
+                    agent = agents.get(cls_name)
+                    if agent is None:
+                        continue
+                    try:
+                        bars_cache.refresh(agent.asset_class, agent.universe)
+                    except Exception:
+                        log.exception("data_refresh: %s refresh failed", cls_name)
+                try:
+                    journal_writer.write({"event": "data_refresh", "scope": "equity_class"})
+                except Exception:
+                    log.warning("data_refresh: post-refresh journal write failed")
+
+            self.register(
+                "data_refresh",
+                _gate_market_hours("equity", _equity_refresh),
+                IntervalTrigger(seconds=60),
+            )
+
+            crypto_agent = agents.get("crypto")
+            if crypto_agent is not None:
+
+                def _crypto_refresh(_a: Agent = crypto_agent) -> None:
+                    try:
+                        bars_cache.refresh(_a.asset_class, _a.universe)
+                        journal_writer.write({"event": "crypto_data_refresh"})
+                    except Exception:
+                        log.exception("crypto_data_refresh failed")
+
+                self.register(
+                    "crypto_data_refresh",
+                    _crypto_refresh,
+                    IntervalTrigger(minutes=5),
+                )
+        else:
+            self.register(
+                "data_refresh",
+                _gate_market_hours(
+                    "equity",
+                    lambda jw=journal_writer: jw.write({"event": "data_refresh"}),
+                ),
+                IntervalTrigger(seconds=60),
+            )
+
+    def _register_operational_jobs(self, *, journal_writer: Any) -> None:
+        """Register the operational (non-agent) cadence jobs."""
         self.register(
             "position_reconcile",
             lambda jw=journal_writer: jw.write({"event": "position_reconcile"}),

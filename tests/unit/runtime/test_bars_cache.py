@@ -123,8 +123,10 @@ def test_refresh_equity_calls_loader_with_correct_window(
     assert len(equity_loader.calls) == 1
     symbols, start, end = equity_loader.calls[0]
     assert symbols == ["SPY", "QQQ"]
-    assert end == clock.now
-    assert start == clock.now - timedelta(days=300)
+    # The cache passes dates (loader API), not datetimes; keep the assertion
+    # aligned with that contract so a regression in the conversion is caught.
+    assert end == clock.now.date()
+    assert start == clock.now.date() - timedelta(days=300)
 
 
 @pytest.mark.parametrize(
@@ -153,8 +155,9 @@ def test_refresh_crypto_calls_loader_with_daily_interval(
     symbols, start, end, interval = args
     assert symbols == ["BTCUSDT"]
     assert interval == "1d"
-    assert end == clock.now
-    assert start == clock.now - timedelta(days=365)
+    # date-typed window (loader API); see equity test for rationale.
+    assert end == clock.now.date()
+    assert start == clock.now.date() - timedelta(days=365)
 
 
 def test_refresh_governance_is_no_op(
@@ -562,8 +565,10 @@ def test_custom_clock_is_used_for_window_computation() -> None:
     )
     cache.refresh(AssetClass.EQUITY, ("SPY",))
     _, start, end = loader.calls[0]
-    assert end == pinned
-    assert start == pinned - timedelta(days=10)
+    # The cache normalizes the clock's datetime to a date before calling the
+    # loader (loader API requires `date`); pin the converted form.
+    assert end == pinned.date()
+    assert start == pinned.date() - timedelta(days=10)
 
 
 def test_clock_accepts_arbitrary_callable() -> None:

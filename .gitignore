@@ -61,6 +61,11 @@ AGENTS.md
 live/state/
 live/incidents/
 live/locks/
+live/runtime/
+live/journal/
+live/memory.db
+live/memory.db-journal
+live/models/
 
 # Journal contents — directory is committed for structure; daily files are not.
 journal/*.jsonl

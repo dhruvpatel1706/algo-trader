@@ -139,17 +139,28 @@ _COINBASE_GRANULARITY_MAP = {
 
 
 def _normalize_crypto_symbol(symbol: str, source: str) -> str:
-    """'BTC-USD' / 'BTC/USD' / 'BTCUSDT' -> source-specific canonical form."""
+    """'BTC-USD' / 'BTC/USD' / 'BTCUSDT' -> source-specific canonical form.
+
+    Coinbase Exchange's public ``/products/{id}/candles`` endpoint quotes
+    spot pairs as USD (e.g. ``BTC-USD``), not USDT. When the caller hands
+    us a Binance-style ``USDT`` symbol but we're routing to Coinbase, we
+    rewrite the quote leg to USD so the request actually resolves
+    (otherwise Coinbase returns 403/404).
+    """
     s = symbol.upper().replace("/", "")
     if source == "binance":
         return s.replace("-", "")
     if source == "coinbase":
-        if "-" in s:
-            return s
-        # Convert e.g. BTCUSD -> BTC-USD by splitting on a known quote currency.
+        # Strip any existing dash so we can re-derive base/quote uniformly.
+        flat = s.replace("-", "")
+        # Canonicalize USDT -> USD for Coinbase routing. Most majors only
+        # list as -USD on Coinbase Exchange; -USDT pairs 403 on the public
+        # candles endpoint. USDC and USD pass through.
         for quote in ("USDT", "USDC", "USD", "EUR", "BTC", "ETH"):
-            if s.endswith(quote) and len(s) > len(quote):
-                return f"{s[: -len(quote)]}-{quote}"
+            if flat.endswith(quote) and len(flat) > len(quote):
+                base = flat[: -len(quote)]
+                effective_quote = "USD" if quote == "USDT" else quote
+                return f"{base}-{effective_quote}"
         return s
     return s
 
@@ -172,6 +183,109 @@ def _http_get_json(url: str) -> object | None:
     except (json.JSONDecodeError, ValueError) as e:
         warnings.warn(f"http parse failed: {url!r}: {e!r}", stacklevel=3)
         return None
+
+
+_ALPACA_CRYPTO_TF: dict[str, str] = {
+    "1m": "1Min",
+    "5m": "5Min",
+    "15m": "15Min",
+    "1h": "1Hour",
+    "4h": "4Hour",
+    "1d": "1Day",
+}
+
+
+def _fetch_alpaca_crypto(
+    symbol: str, start: date, end: date, interval: str = "1d"
+) -> pd.DataFrame | None:
+    """Pull crypto bars from Alpaca's authenticated crypto data API.
+
+    Preferred over Binance/Coinbase from US deployments because:
+    - Binance returns HTTP 451 (geoblocked from US IPs).
+    - Coinbase Exchange's anonymous candles endpoint 403s many cloud IPs.
+    - Alpaca crypto data is included with paper accounts at no extra cost.
+
+    Returns None if Alpaca credentials are missing, the SDK isn't installed,
+    or the request fails — the caller will fall through to other sources.
+    """
+    s = get_settings()
+    if not (s.ALPACA_API_KEY and s.ALPACA_SECRET_KEY):
+        return None
+    tf_name = _ALPACA_CRYPTO_TF.get(interval)
+    if tf_name is None:
+        return None
+    try:
+        from alpaca.data.historical import CryptoHistoricalDataClient
+        from alpaca.data.requests import CryptoBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    except ImportError:
+        return None
+
+    # Map our interval string to a TimeFrame instance.
+    tf_map: dict[str, TimeFrame] = {
+        "1m": TimeFrame(1, TimeFrameUnit.Minute),
+        "5m": TimeFrame(5, TimeFrameUnit.Minute),
+        "15m": TimeFrame(15, TimeFrameUnit.Minute),
+        "1h": TimeFrame(1, TimeFrameUnit.Hour),
+        "4h": TimeFrame(4, TimeFrameUnit.Hour),
+        "1d": TimeFrame.Day,
+    }
+    tf = tf_map.get(interval)
+    if tf is None:
+        return None
+
+    alpaca_sym = _normalize_crypto_symbol_alpaca(symbol)
+    try:
+        client = CryptoHistoricalDataClient(s.ALPACA_API_KEY, s.ALPACA_SECRET_KEY)
+        req = CryptoBarsRequest(
+            symbol_or_symbols=alpaca_sym,
+            timeframe=tf,
+            start=datetime(start.year, start.month, start.day, tzinfo=UTC),
+            end=datetime(end.year, end.month, end.day, tzinfo=UTC),
+        )
+        resp = client.get_crypto_bars(req)
+    except Exception as e:
+        warnings.warn(f"alpaca crypto fetch failed for {symbol!r}: {e!r}", stacklevel=2)
+        return None
+
+    df_full = resp.df if hasattr(resp, "df") else None
+    if df_full is None or df_full.empty:
+        return None
+
+    # The MultiIndex is (symbol, timestamp). Pull this symbol's slice.
+    try:
+        if alpaca_sym not in df_full.index.get_level_values(0).unique():
+            return None
+        df = df_full.xs(alpaca_sym, level=0)
+    except (KeyError, IndexError):
+        return None
+
+    # Match the (open, high, low, close, volume) shape the rest of the
+    # loader uses; Alpaca exposes more columns we don't need here.
+    keep = [c for c in ("open", "high", "low", "close", "volume") if c in df.columns]
+    df = df[keep].copy()
+    if df.empty:
+        return None
+    # Ensure tz-aware UTC index, sorted, deduped.
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    if df.index.tzinfo is None:
+        df.index = df.index.tz_localize("UTC")
+    return df
+
+
+def _normalize_crypto_symbol_alpaca(symbol: str) -> str:
+    """'BTCUSDT' / 'BTC-USD' / 'BTC/USD' -> Alpaca format ('BTC/USD').
+
+    Alpaca uses USD pairs (no USDT on the data API), so we route USDT-quoted
+    inputs to USD just like Coinbase does.
+    """
+    s = symbol.upper().replace("/", "").replace("-", "")
+    for quote in ("USDT", "USDC", "USD", "EUR", "BTC", "ETH"):
+        if s.endswith(quote) and len(s) > len(quote):
+            base = s[: -len(quote)]
+            effective_quote = "USD" if quote == "USDT" else quote
+            return f"{base}/{effective_quote}"
+    return symbol
 
 
 def _fetch_binance(
@@ -296,13 +410,41 @@ def _fetch_coinbase(
     return df[["open", "high", "low", "close", "volume"]]
 
 
+_CRYPTO_FETCHERS = {
+    "alpaca": (_fetch_alpaca_crypto,),
+    "binance": (_fetch_binance,),
+    "coinbase": (_fetch_coinbase,),
+    "auto": (_fetch_alpaca_crypto, _fetch_binance, _fetch_coinbase),
+}
+
+
+def _read_crypto_cache(
+    sym: str, interval: str, start: date, end: date
+) -> pd.DataFrame | None:
+    """Return cached bars for ``sym`` if present and covering [start, end]."""
+    path = _cache_path(sym, interval)
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_parquet(path)
+    except (OSError, ValueError):
+        return None
+    if not _covers_requested_range_ts(df, start, end):
+        return None
+    df = df.loc[
+        (df.index >= pd.Timestamp(start, tz="UTC"))
+        & (df.index <= pd.Timestamp(end, tz="UTC"))
+    ]
+    return df if not df.empty else None
+
+
 def load_crypto_bars(
     symbols: Iterable[str],
     start: date,
     end: date,
     interval: str = "1h",
     *,
-    source: str = "binance",
+    source: str = "auto",
     use_cache: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """Crypto OHLCV per symbol, mirroring `load_daily_bars` but for 24/7 markets.
@@ -315,35 +457,36 @@ def load_crypto_bars(
         UTC date range.
     interval : str
         '1h' (default), '5m', '15m', '1d', etc. Source-specific support varies.
-    source : {'binance', 'coinbase'}
-        Which public REST endpoint to use.
+    source : {'auto', 'alpaca', 'binance', 'coinbase'}
+        Which endpoint to use. ``'auto'`` (default) tries Alpaca first
+        (authenticated, US-friendly), then Binance, then Coinbase per
+        symbol. From US deployments Binance returns HTTP 451 and the
+        anonymous Coinbase candles endpoint frequently 403s, so the
+        Alpaca leg is what actually delivers in practice.
     use_cache : bool
         Read/write parquet cache at ``data/cache/<SYMBOL>_<interval>.parquet``.
     """
     src = source.lower().strip()
-    if src not in ("binance", "coinbase"):
+    fetchers = _CRYPTO_FETCHERS.get(src)
+    if fetchers is None:
         raise ValueError(f"unsupported crypto source {source!r}")
 
-    fetch = _fetch_binance if src == "binance" else _fetch_coinbase
     out: dict[str, pd.DataFrame] = {}
     for sym in symbols:
-        path = _cache_path(sym, interval)
-        if use_cache and path.exists():
-            try:
-                df = pd.read_parquet(path)
-                if _covers_requested_range_ts(df, start, end):
-                    df = df.loc[
-                        (df.index >= pd.Timestamp(start, tz="UTC"))
-                        & (df.index <= pd.Timestamp(end, tz="UTC"))
-                    ]
-                    if not df.empty:
-                        out[sym] = df
-                        continue
-            except (OSError, ValueError):
-                pass  # fall through to fetch
+        if use_cache:
+            cached = _read_crypto_cache(sym, interval, start, end)
+            if cached is not None:
+                out[sym] = cached
+                continue
 
-        df = fetch(sym, start, end, interval)
+        df: pd.DataFrame | None = None
+        for fetch in fetchers:
+            df = fetch(sym, start, end, interval)
+            if df is not None and not df.empty:
+                break
+
         if df is not None and not df.empty:
+            path = _cache_path(sym, interval)
             try:
                 df.to_parquet(path)
             except OSError as e:  # pragma: no cover - filesystem edge case
