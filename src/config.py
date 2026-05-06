@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     DAILY_LOSS_HALT: Decimal = Field(default=Decimal("-0.02"))
     DRAWDOWN_HALT: Decimal = Field(default=Decimal("0.15"))
 
+    # Daily realized-loss circuit breaker. Halts NEW entries (exits still allowed)
+    # when today's realized P&L breaches this floor. See `src/risk/daily_loss.py`.
+    daily_loss_floor_pct: float = Field(
+        default=-0.03,
+        description=(
+            "Daily realized loss floor as fraction of starting equity. "
+            "New entries halted when breached. Range: [-0.20, 0.0]. Default -3%."
+        ),
+    )
+
     # --- Dashboard ---
     DASHBOARD_API_HOST: str = Field(default="0.0.0.0")
     DASHBOARD_API_PORT: int = Field(default=8000)
@@ -108,6 +118,13 @@ class Settings(BaseSettings):
     def _drawdown_bounds(cls, v: Decimal) -> Decimal:
         if not (Decimal("0") < v <= Decimal("0.30")):
             raise ValueError("DRAWDOWN_HALT must be in (0, 0.30]")
+        return v
+
+    @field_validator("daily_loss_floor_pct")
+    @classmethod
+    def _daily_loss_floor_bounds(cls, v: float) -> float:
+        if not (-0.20 <= v <= 0.0):
+            raise ValueError("daily_loss_floor_pct must be in [-0.20, 0.0]")
         return v
 
 

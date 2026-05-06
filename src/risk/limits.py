@@ -13,6 +13,7 @@ from typing import Literal
 
 from src.config import get_settings
 from src.execution.option_order import OptionOrder
+from src.risk.daily_loss import DailyLossBreaker
 from src.risk.option_limits import OptionLimitError, OptionLimits, check_option_order
 from src.risk.sizing import drawdown_fraction, portfolio_heat, position_size
 
@@ -133,3 +134,22 @@ def compliance_check_option(
         True,
         f"option compliance OK ({order.strategy_kind}, max_loss={order.max_loss_usd})",
     )
+
+
+def check_daily_loss(breaker: DailyLossBreaker) -> tuple[bool, str]:
+    """Check the daily loss circuit breaker.
+
+    Thin delegating hook: defers to :class:`src.risk.daily_loss.DailyLossBreaker`
+    so callers don't need to construct/inspect a :class:`DailyLossDecision`
+    when they only care about the binary gate.
+
+    Args:
+        breaker: A configured :class:`DailyLossBreaker` instance.
+
+    Returns:
+        ``(allowed, reason)`` — ``allowed`` is ``False`` when new entries should
+        be blocked (the daily floor has been breached); ``reason`` is a
+        human-readable explanation suitable for logging or refusal events.
+    """
+    decision = breaker.check()
+    return decision.can_open_new, decision.reason
