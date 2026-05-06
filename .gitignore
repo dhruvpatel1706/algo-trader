@@ -63,6 +63,7 @@ live/incidents/
 live/locks/
 live/runtime/
 live/journal/
+live/watchdog/
 live/memory.db
 live/memory.db-journal
 live/models/
