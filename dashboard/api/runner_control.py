@@ -147,6 +147,16 @@ class RunnerSupervisor:
 
             env = os.environ.copy()
             env.setdefault("PYTHONUNBUFFERED", "1")
+            # The runner is invoked as a script (not `python -m`), so the
+            # project root is NOT automatically on sys.path. Without an
+            # editable install, `from src.config import ...` ModuleNotFounds
+            # immediately. Prepending PROJECT_ROOT to PYTHONPATH makes the
+            # spawn robust regardless of whether the venv has the project
+            # installed editable.
+            existing_pp = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                f"{PROJECT_ROOT}{os.pathsep}{existing_pp}" if existing_pp else str(PROJECT_ROOT)
+            )
             cmd = [sys.executable, str(_RUN_BOT)]
             self._proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
                 cmd,
