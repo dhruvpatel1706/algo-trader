@@ -123,6 +123,68 @@ class BrokerProxy:
 
         return self._cached(f"orders:{status}:{limit}", fetch)
 
+    def get_crypto_marks(self, symbols: list[str]) -> dict[str, dict] | None:
+        """Latest crypto quote (bid / ask / mid) for ``symbols``.
+
+        Why this exists: ``c.get_all_positions()`` returns ``current_price``
+        from Alpaca's pricing engine, which on the paper crypto data tier
+        ticks slowly (sometimes 3+ minutes between updates). The market-data
+        ``CryptoLatestQuoteRequest`` is more responsive — using its mid as
+        the live mark in /api/positions/live makes the UI feel alive even
+        when no order activity is happening.
+
+        Cached at the same 3s TTL as everything else in this proxy so we
+        don't hammer the data API under dashboard polling.
+
+        Returns a dict keyed by Alpaca symbol format (``ETH/USD``):
+          ``{ "ETH/USD": {"bid": 2349.6, "ask": 2351.9, "mid": 2350.75,
+                          "ts": "2026-05-06T21:25:01.586+00:00"} }``
+
+        Returns None on any failure (caller should fall back to position
+        snapshot price).
+        """
+        if not symbols:
+            return {}
+        # Cache key includes the symbols set so distinct queries don't
+        # clobber each other.
+        cache_key = "crypto_marks:" + ",".join(sorted(set(symbols)))
+
+        def fetch(_c):  # _c unused: this leg uses the data client, not trading client
+            try:
+                from alpaca.data.historical import CryptoHistoricalDataClient
+                from alpaca.data.requests import CryptoLatestQuoteRequest
+            except ImportError:
+                return None
+            s = get_settings()
+            if not (s.ALPACA_API_KEY and s.ALPACA_SECRET_KEY):
+                return None
+            try:
+                data = CryptoHistoricalDataClient(s.ALPACA_API_KEY, s.ALPACA_SECRET_KEY)
+                req = CryptoLatestQuoteRequest(symbol_or_symbols=list(symbols))
+                quotes = data.get_crypto_latest_quote(req)
+            except Exception as e:
+                log.warning("crypto-marks fetch failed: %r", e)
+                return None
+            out: dict[str, dict] = {}
+            for sym, q in quotes.items():
+                bid = float(q.bid_price) if q.bid_price else 0.0
+                ask = float(q.ask_price) if q.ask_price else 0.0
+                # Use mid when both sides are present; else fall back to whichever
+                # leg has data (extremely thin books occasionally show a 0 leg).
+                if bid > 0 and ask > 0:
+                    mid = (bid + ask) / 2
+                else:
+                    mid = bid or ask
+                out[sym] = {
+                    "bid": bid,
+                    "ask": ask,
+                    "mid": mid,
+                    "ts": q.timestamp.isoformat() if q.timestamp else None,
+                }
+            return out
+
+        return self._cached(cache_key, fetch)
+
     @staticmethod
     def _period_for_days(days: int) -> str:
         """Map our ``days`` query param to the closest Alpaca ``period`` bucket.

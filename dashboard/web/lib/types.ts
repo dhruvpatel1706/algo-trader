@@ -147,7 +147,19 @@ export type EquityPoint = {
   drawdown?: number;
 };
 
-export type LivePosition = Position & {
+export type LivePositionExtras = {
+  /**
+   * ISO8601 UTC timestamp when ``current_price`` was last refreshed by the
+   * server. The UI uses this to render a "last update" indicator —
+   * Alpaca's paper crypto data tier ticks slowly, so without this the
+   * frozen number looks like a polling bug.
+   */
+  mark_as_of: string | null;
+  /** "position_snapshot" or "latest_quote_mid". */
+  mark_source: string | null;
+};
+
+export type LivePosition = Position & LivePositionExtras & {
   agent?: string;
   strategy?: string;
 };

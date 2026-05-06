@@ -2,6 +2,7 @@
 import { api } from "@/lib/api";
 import type { LivePosition, Position } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 /**
  * Defensive numeric formatter.
@@ -42,6 +43,19 @@ function fmtQty(qty: number | null | undefined, symbol: string): string {
   });
 }
 
+/** Human-readable "x s ago" / "x m ago" for the price-freshness chip. */
+function fmtAge(iso: string | null | undefined, nowMs: number): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
 /**
  * Live positions: prefers /api/positions/live (per-agent attribution); falls
  * back to /api/positions for the v1 broker-snapshot view.
@@ -59,6 +73,15 @@ export function LivePositionsTable() {
     refetchInterval: 5_000,
     enabled: !live.data || live.data.length === 0,
   });
+
+  // Tick a "now" stamp each second so the "X s ago" mark age updates without
+  // waiting for a full refetch — the user can SEE the data is fresh even if
+  // the price hasn't moved (Alpaca paper crypto ticks are slow).
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const rows: LivePosition[] | Position[] =
     (live.data && live.data.length > 0 ? live.data : fallback.data) ?? [];
@@ -78,6 +101,7 @@ export function LivePositionsTable() {
               <th className="px-4 py-2">qty</th>
               <th className="px-4 py-2">avg entry</th>
               <th className="px-4 py-2">live mark</th>
+              <th className="px-4 py-2">mark age</th>
               <th className="px-4 py-2">mkt value</th>
               <th className="px-4 py-2">unrealized P&L</th>
               <th className="px-4 py-2">side</th>
@@ -86,7 +110,7 @@ export function LivePositionsTable() {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-muted">
+                <td colSpan={10} className="px-4 py-6 text-center text-muted">
                   no open positions
                 </td>
               </tr>
@@ -106,6 +130,12 @@ export function LivePositionsTable() {
                   <td className="px-4 py-2">{fmtQty(p.qty, p.symbol)}</td>
                   <td className="px-4 py-2">${fmt(p.avg_entry_price)}</td>
                   <td className="px-4 py-2">${fmt(p.current_price)}</td>
+                  <td
+                    className="px-4 py-2 text-xs text-muted"
+                    title={lp.mark_source ?? "—"}
+                  >
+                    {fmtAge(lp.mark_as_of, nowMs)}
+                  </td>
                   <td className="px-4 py-2">${fmt(p.market_value)}</td>
                   <td
                     className={`px-4 py-2 ${upl > 0 ? "text-accent" : upl < 0 ? "text-danger" : "text-muted"}`}

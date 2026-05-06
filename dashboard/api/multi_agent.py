@@ -84,6 +84,15 @@ class LivePosition(BaseModel):
     distance_to_stop: float | None = None
     side: str
     agent: str | None = None
+    # When the price was last refreshed (server-side ISO8601 UTC). Lets the
+    # UI render a "X seconds ago" freshness indicator so a slow-ticking
+    # paper-tier crypto quote doesn't look frozen — the user can see we
+    # ARE refetching, even if Alpaca returned the same number.
+    mark_as_of: str | None = None
+    # Source of ``current_price`` — either ``"position_snapshot"`` (slow,
+    # from c.get_all_positions) or ``"latest_quote_mid"`` (fresher, from
+    # the crypto data API). Useful for diagnosing stale prices.
+    mark_source: str | None = None
 
 
 class SignalRecord(BaseModel):
@@ -448,9 +457,43 @@ async def portfolio_equity(
     )
 
 
+def _is_crypto_symbol(symbol: str) -> bool:
+    """Heuristic: Alpaca returns crypto symbols on the trading API as
+    'ETHUSD' / 'BTCUSD' (no slash) and on the data API as 'ETH/USD'.
+    We accept both shapes — anything ending in a fiat/stable suffix that's
+    NOT an equity ticker pattern.
+    """
+    if "/" in symbol:
+        return True
+    # Equity tickers are 1-5 letters, no concatenated quote currency.
+    # Crypto on Alpaca paper: BTCUSD, ETHUSD, BTCUSDT etc.
+    upper = symbol.upper()
+    return any(
+        upper.endswith(q) and len(upper) > len(q)
+        for q in ("USDT", "USDC", "USD")
+    ) and len(upper) > 4  # Excludes the rare 4-letter equities like AAPL
+
+
+def _to_data_api_symbol(symbol: str) -> str:
+    """'ETHUSD' -> 'ETH/USD'. Idempotent for already-slashed symbols."""
+    if "/" in symbol:
+        return symbol
+    upper = symbol.upper()
+    for q in ("USDT", "USDC", "USD"):
+        if upper.endswith(q) and len(upper) > len(q):
+            return f"{upper[: -len(q)]}/{q}"
+    return symbol
+
+
 @router.get("/api/positions/live", response_model=list[LivePosition])
 async def positions_live() -> list[LivePosition]:
-    """Currently-open positions with live mark, unrealized P&L, distance-to-stop."""
+    """Currently-open positions with live mark, unrealized P&L, distance-to-stop.
+
+    For crypto positions, overrides the position-snapshot ``current_price``
+    (which Alpaca paper updates infrequently) with the latest-quote mid
+    from the market-data API. Refreshed unrealized P&L is recomputed from
+    the live mark so the user sees the price actually moving.
+    """
     try:
         from dashboard.api.broker_proxy import get_broker_proxy
 
@@ -459,25 +502,63 @@ async def positions_live() -> list[LivePosition]:
     except Exception:
         raw = []
 
+    # Pull live crypto quotes once for all crypto positions in this batch.
+    # Alpaca's trading API uses 'ETHUSD'; the data API needs 'ETH/USD' —
+    # we translate at the boundary and look up by data-API form below.
+    crypto_marks: dict[str, dict] = {}
+    crypto_symbols_data_form = [
+        _to_data_api_symbol(p["symbol"])
+        for p in raw
+        if _is_crypto_symbol(p.get("symbol", ""))
+    ]
+    if crypto_symbols_data_form:
+        try:
+            crypto_marks = broker.get_crypto_marks(crypto_symbols_data_form) or {}
+        except Exception:
+            crypto_marks = {}
+
     out: list[LivePosition] = []
+    now_iso = datetime.now(UTC).isoformat()
     for p in raw:
         try:
-            current = float(p.get("current_price", 0.0))
+            symbol = p["symbol"]
             entry = float(p.get("avg_entry_price", 0.0))
+            qty = float(p.get("qty", 0.0))
+
+            # Default: use the position-snapshot price.
+            current = float(p.get("current_price", 0.0))
+            mark_as_of = now_iso
+            mark_source = "position_snapshot"
+            unrealized_pl = float(p.get("unrealized_pl", 0.0))
+            unrealized_plpc = float(p.get("unrealized_plpc", 0.0))
+
+            # If we have a fresher crypto quote, prefer it and recompute P&L
+            # from the live mid so the UI numbers stay consistent.
+            quote = crypto_marks.get(_to_data_api_symbol(symbol))
+            if quote and quote.get("mid", 0.0) > 0:
+                current = float(quote["mid"])
+                mark_as_of = quote.get("ts") or now_iso
+                mark_source = "latest_quote_mid"
+                if entry > 0 and qty > 0:
+                    unrealized_pl = (current - entry) * qty
+                    unrealized_plpc = (current - entry) / entry
+
             # No formal stop tracking yet; surface a 5% heuristic for the UI.
             stop_est = entry * 0.95 if entry > 0 else 0.0
             distance = (current - stop_est) / current if current else None
             out.append(
                 LivePosition(
-                    symbol=p["symbol"],
-                    qty=float(p.get("qty", 0.0)),
+                    symbol=symbol,
+                    qty=qty,
                     avg_entry_price=entry,
                     current_price=current,
-                    unrealized_pl=float(p.get("unrealized_pl", 0.0)),
-                    unrealized_plpc=float(p.get("unrealized_plpc", 0.0)),
+                    unrealized_pl=unrealized_pl,
+                    unrealized_plpc=unrealized_plpc,
                     distance_to_stop=distance,
                     side=str(p.get("side", "long")).lower(),
                     agent=p.get("agent"),
+                    mark_as_of=mark_as_of,
+                    mark_source=mark_source,
                 )
             )
         except (KeyError, TypeError, ValueError):
