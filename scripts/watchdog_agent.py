@@ -548,14 +548,14 @@ def run_cycle(api_base: str = _DEFAULT_API_BASE) -> WatchdogVerdict:
 def _maybe_load_dotenv() -> None:
     """Best-effort .env loader so the LLM router sees keys.
 
-    The runner already loads .env via uvicorn's startup; this script runs
-    standalone so we replicate the load here. Silent if dotenv is missing
-    (we'll fall back to whatever's in os.environ).
+    Uses ``override=True`` so a stale empty env var in the parent shell
+    (e.g. a prior ``export ANTHROPIC_API_KEY=`` line) doesn't shadow the
+    real value in ``.env``. Silent if dotenv is missing.
     """
     try:
         from dotenv import load_dotenv
 
-        load_dotenv()
+        load_dotenv(override=True)
     except ImportError:
         pass
 

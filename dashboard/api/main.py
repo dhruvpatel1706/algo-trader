@@ -11,6 +11,7 @@ Routes:
   GET  /api/costs                  — LLM token + API request counter
   GET  /api/agent-events           — recent agent activity (ring buffer)
   GET  /api/incidents              — past kill incidents
+  GET  /api/feeds/status           — which API keys / integrations are configured
   GET  /api/bot/status             — runner state, pid, uptime, log tail
   POST /api/bot/start              — spawn scripts/run_bot.py
   POST /api/bot/stop               — SIGTERM (then SIGKILL after grace) the runner
@@ -28,6 +29,17 @@ import logging
 from datetime import date
 from typing import Annotated
 
+# Load .env BEFORE anything that reads os.environ. Without override=True a
+# stale empty var in the parent shell (e.g. an unset ``export FOO=`` line
+# left over from a prior session) shadows the real value in .env, leading
+# to false negatives in /api/feeds/status and crippled LLM router fallback.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=True)
+except ImportError:
+    pass
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -38,6 +50,7 @@ from src.observability.metrics import COST_USD_TOTAL, KILL_INVOCATIONS, PORTFOLI
 from dashboard.api import ws as ws_module
 from dashboard.api.broker_proxy import BrokerProxy, get_broker_proxy
 from dashboard.api.dashboard_metrics import trailing_metrics
+from dashboard.api.feeds_status import router as feeds_status_router
 from dashboard.api.journal_reader import read_trades
 from dashboard.api.kill import execute_kill, list_incidents
 from dashboard.api.multi_agent import router as multi_agent_router
@@ -70,6 +83,8 @@ app.include_router(multi_agent_router)
 app.include_router(refusal_router)
 # Trade export: download every recorded trade as CSV.
 app.include_router(trade_export_router)
+# Feeds status: which API keys / integrations are configured.
+app.include_router(feeds_status_router)
 
 
 class KillRequest(BaseModel):

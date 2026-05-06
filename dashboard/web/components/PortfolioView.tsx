@@ -1,5 +1,6 @@
 "use client";
 
+import { FeedsStatusBar } from "@/components/FeedsStatusBar";
 import { LivePositionsTable } from "@/components/LivePositionsTable";
 import { NewsTickerBar } from "@/components/NewsTickerBar";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
@@ -102,6 +103,8 @@ export function PortfolioView() {
         <AnalyticsPanel />
 
         <LivePositionsTable />
+
+        <FeedsStatusBar />
       </div>
     </>
   );

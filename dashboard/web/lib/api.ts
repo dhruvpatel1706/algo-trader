@@ -6,6 +6,7 @@ import type {
   CoherenceState,
   Costs,
   EquityPoint,
+  FeedsStatusResponse,
   HaltStatus,
   InsiderTrade,
   LivePosition,
@@ -93,6 +94,12 @@ export const api = {
     return Array.isArray(raw?.points) ? raw.points : [];
   },
   livePositions: () => safeFetch<LivePosition[]>("/api/positions/live", []),
+  feedsStatus: () =>
+    safeFetch<FeedsStatusResponse>("/api/feeds/status", {
+      feeds: [],
+      n_configured: 0,
+      n_total: 0,
+    }),
   recentSignals: async (limit = 100): Promise<Signal[]> => {
     const raw = await safeFetch<{ signals?: Signal[] } | Signal[]>(
       `/api/signals/recent?limit=${limit}`,

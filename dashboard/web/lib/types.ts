@@ -13,15 +13,34 @@ export type Portfolio = {
   paper?: boolean;
 };
 
+// All numeric fields are `number | null` because the broker proxy can return
+// nulls for freshly-opened positions (P&L not yet computed) and for orders
+// in `accepted` state before fills. `qty` is a float — crypto positions are
+// fractional (3.99 ETH, not 3 ETH).
 export type Position = {
   symbol: string;
-  qty: number;
-  avg_entry_price: number;
-  market_value: number;
-  unrealized_pl: number;
-  unrealized_plpc: number;
-  current_price: number;
+  qty: number | null;
+  avg_entry_price: number | null;
+  market_value: number | null;
+  unrealized_pl: number | null;
+  unrealized_plpc: number | null;
+  current_price: number | null;
   side: string;
+};
+
+export type FeedStatus = {
+  name: string;
+  env_var: string;
+  category: "broker" | "llm" | "news" | "data" | "altdata" | "alerts";
+  required_for: string[];
+  configured: boolean;
+  preview: string | null;
+};
+
+export type FeedsStatusResponse = {
+  feeds: FeedStatus[];
+  n_configured: number;
+  n_total: number;
 };
 
 export type Order = {

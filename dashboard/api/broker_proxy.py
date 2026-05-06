@@ -81,7 +81,10 @@ class BrokerProxy:
             return [
                 {
                     "symbol": p.symbol,
-                    "qty": int(float(p.qty)),
+                    # qty stays float — crypto positions hold fractional units.
+                    # int() truncation here was silently dropping ~$2K of value
+                    # for a typical 4-ETH position (3.99 ETH → 3 ETH).
+                    "qty": float(p.qty),
                     "avg_entry_price": float(p.avg_entry_price),
                     "market_value": float(p.market_value),
                     "unrealized_pl": float(p.unrealized_pl),
@@ -105,13 +108,14 @@ class BrokerProxy:
                     "id": str(o.id),
                     "client_order_id": o.client_order_id,
                     "symbol": o.symbol,
-                    "qty": int(float(o.qty)) if o.qty else None,
+                    # qty + filled_qty stay float; see get_positions() rationale.
+                    "qty": float(o.qty) if o.qty else None,
                     "side": str(o.side).lower(),
                     "type": str(o.order_type).lower(),
                     "limit_price": float(o.limit_price) if o.limit_price else None,
                     "status": str(o.status).lower(),
                     "submitted_at": str(o.submitted_at) if o.submitted_at else None,
-                    "filled_qty": int(float(o.filled_qty)) if o.filled_qty else 0,
+                    "filled_qty": float(o.filled_qty) if o.filled_qty else 0.0,
                     "filled_avg_price": (float(o.filled_avg_price) if o.filled_avg_price else None),
                 }
                 for o in orders

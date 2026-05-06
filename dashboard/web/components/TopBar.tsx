@@ -36,8 +36,20 @@ const NAV: { label: string; href: string }[] = [
 ];
 
 export function TopBar() {
-  const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio });
-  const halt = useQuery({ queryKey: ["halt"], queryFn: api.halt });
+  // Equity / cash / buying-power update every 5s — the screenshot the user
+  // saw had stale numbers because these queries were one-shot. Refetching on
+  // window focus catches the case where the user tabs away and comes back.
+  const portfolio = useQuery({
+    queryKey: ["portfolio"],
+    queryFn: api.portfolio,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+  });
+  const halt = useQuery({
+    queryKey: ["halt"],
+    queryFn: api.halt,
+    refetchInterval: 10_000,
+  });
   const agentsQ = useQuery({
     queryKey: ["agents-topbar"],
     queryFn: () => api.agents(),
@@ -46,7 +58,7 @@ export function TopBar() {
   const positionsQ = useQuery({
     queryKey: ["positions-topbar"],
     queryFn: () => api.positions(),
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
   });
   const pathname = usePathname();
 

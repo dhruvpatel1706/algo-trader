@@ -31,6 +31,16 @@ import os
 from pathlib import Path
 from typing import Any
 
+# Load .env BEFORE the LLM router / broker construct themselves, with
+# override=True so a stale empty var in the parent shell doesn't shadow the
+# real value in .env. Silent if dotenv isn't installed.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=True)
+except ImportError:
+    pass
+
 from src.config import PROJECT_ROOT
 from src.journal.writer import JournalWriter
 from src.runtime.scheduler import Runner

@@ -73,7 +73,10 @@ class PortfolioEquityResponse(BaseModel):
 
 class LivePosition(BaseModel):
     symbol: str
-    qty: int
+    # qty is float, NOT int — crypto positions hold fractional units (you can
+    # buy 3.99 ETH; truncating to int drops $2K+ of position value and breaks
+    # the cash math reconciliation in the dashboard top-bar).
+    qty: float
     avg_entry_price: float
     current_price: float
     unrealized_pl: float
@@ -467,7 +470,7 @@ async def positions_live() -> list[LivePosition]:
             out.append(
                 LivePosition(
                     symbol=p["symbol"],
-                    qty=int(p.get("qty", 0)),
+                    qty=float(p.get("qty", 0.0)),
                     avg_entry_price=entry,
                     current_price=current,
                     unrealized_pl=float(p.get("unrealized_pl", 0.0)),

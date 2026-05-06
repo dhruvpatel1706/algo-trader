@@ -19,6 +19,15 @@ function isNum(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n);
 }
 
+function fmtQty(qty: number | null | undefined, symbol: string): string {
+  if (qty === null || qty === undefined || Number.isNaN(qty)) return "—";
+  const isCrypto = /USD$|USDT$|USDC$|BTC$|ETH$/i.test(symbol) || symbol.includes("/");
+  return qty.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: isCrypto ? 4 : 0,
+  });
+}
+
 export function PositionsTable() {
   const q = useQuery({ queryKey: ["positions"], queryFn: api.positions });
   const rows = q.data ?? [];
@@ -55,7 +64,7 @@ export function PositionsTable() {
               return (
                 <tr key={p.symbol} className="border-t border-border font-mono">
                   <td className="px-4 py-2 font-semibold">{p.symbol}</td>
-                  <td className="px-4 py-2">{p.qty ?? "—"}</td>
+                  <td className="px-4 py-2">{fmtQty(p.qty, p.symbol)}</td>
                   <td className="px-4 py-2">${fmt(p.avg_entry_price)}</td>
                   <td className="px-4 py-2">${fmt(p.current_price)}</td>
                   <td className="px-4 py-2">${fmt(p.market_value)}</td>

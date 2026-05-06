@@ -27,14 +27,36 @@ function isNum(n: unknown): n is number {
 }
 
 /**
+ * Crypto positions are fractional (e.g. 3.99 ETH). Equity positions are whole
+ * units. Detect the asset class from the symbol shape so the qty column shows
+ * the right precision — without this the user sees "3 ETHUSD" for a 3.99 ETH
+ * position and thinks $2K+ went missing.
+ */
+function fmtQty(qty: number | null | undefined, symbol: string): string {
+  if (qty === null || qty === undefined || Number.isNaN(qty)) return "—";
+  const isCrypto = /USD$|USDT$|USDC$|BTC$|ETH$/i.test(symbol) || symbol.includes("/");
+  const decimals = isCrypto ? 4 : 0;
+  return qty.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/**
  * Live positions: prefers /api/positions/live (per-agent attribution); falls
  * back to /api/positions for the v1 broker-snapshot view.
  */
 export function LivePositionsTable() {
-  const live = useQuery({ queryKey: ["positions-live"], queryFn: api.livePositions });
+  const live = useQuery({
+    queryKey: ["positions-live"],
+    queryFn: api.livePositions,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+  });
   const fallback = useQuery({
     queryKey: ["positions"],
     queryFn: api.positions,
+    refetchInterval: 5_000,
     enabled: !live.data || live.data.length === 0,
   });
 
@@ -81,7 +103,7 @@ export function LivePositionsTable() {
                   <td className="px-4 py-2 font-semibold">{p.symbol}</td>
                   <td className="px-4 py-2 text-xs text-muted">{lp.agent ?? "—"}</td>
                   <td className="px-4 py-2 text-xs text-muted">{lp.strategy ?? "—"}</td>
-                  <td className="px-4 py-2">{p.qty ?? "—"}</td>
+                  <td className="px-4 py-2">{fmtQty(p.qty, p.symbol)}</td>
                   <td className="px-4 py-2">${fmt(p.avg_entry_price)}</td>
                   <td className="px-4 py-2">${fmt(p.current_price)}</td>
                   <td className="px-4 py-2">${fmt(p.market_value)}</td>
