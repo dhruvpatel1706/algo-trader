@@ -50,6 +50,9 @@ dependencies = [
   "fakeredis>=2.24",
   # XXE-hardened XML parser for SEC EDGAR ingestion.
   "defusedxml>=0.7",
+  "google-genai>=1.75.0",
+  "anthropic>=0.100.0",
+  "openai>=2.35.0",
 ]
 
 [project.optional-dependencies]

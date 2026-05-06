@@ -214,6 +214,23 @@ def _dispatch(
     raise _ProviderUnavailable(f"unknown provider: {spec.provider}")
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    """Coerce to int; return default on None or non-numeric input.
+
+    SDK usage metadata fields are nominally integers but in practice can be
+    None (response truncated mid-stream, model didn't report tokens, SDK
+    minor-version skew). A bare ``int(None)`` crashes; this helper makes
+    the conversion best-effort so a usage-counter mishap never aborts an
+    LLM call that already returned text.
+    """
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _call_anthropic(
     model: str, api_key: str, system: str, user: str, max_tokens: int, temperature: float
 ) -> tuple[str, int, int]:
@@ -234,8 +251,8 @@ def _call_anthropic(
             block.text for block in msg.content if getattr(block, "type", "") == "text"
         )
         usage = getattr(msg, "usage", None)
-        in_tok = int(getattr(usage, "input_tokens", 0)) if usage else 0
-        out_tok = int(getattr(usage, "output_tokens", 0)) if usage else 0
+        in_tok = _safe_int(getattr(usage, "input_tokens", 0)) if usage else 0
+        out_tok = _safe_int(getattr(usage, "output_tokens", 0)) if usage else 0
         return text, in_tok, out_tok
     except Exception as e:
         if _is_retryable(e):
@@ -253,6 +270,13 @@ def _call_gemini(
     try:
         client = genai.Client(api_key=api_key)
         # google-genai accepts system_instruction in config.
+        # thinking_budget=0 disables the gemini-2.5-flash internal-thinking
+        # phase. Our use case is a structured JSON classifier (autonomous
+        # reasoner returning a multiplier + halt vote); we want the full
+        # max_output_tokens budget devoted to the answer, not to invisible
+        # reasoning that we don't read. With thinking enabled, a small
+        # max_tokens budget can be consumed entirely by internal thoughts
+        # and produce zero user-facing output.
         resp = client.models.generate_content(
             model=model,
             contents=user,
@@ -260,12 +284,13 @@ def _call_gemini(
                 "system_instruction": system,
                 "max_output_tokens": max_tokens,
                 "temperature": temperature,
+                "thinking_config": {"thinking_budget": 0},
             },
         )
         text = getattr(resp, "text", None) or ""
         meta = getattr(resp, "usage_metadata", None)
-        in_tok = int(getattr(meta, "prompt_token_count", 0)) if meta else 0
-        out_tok = int(getattr(meta, "candidates_token_count", 0)) if meta else 0
+        in_tok = _safe_int(getattr(meta, "prompt_token_count", 0)) if meta else 0
+        out_tok = _safe_int(getattr(meta, "candidates_token_count", 0)) if meta else 0
         return text, in_tok, out_tok
     except Exception as e:
         if _is_retryable(e):
@@ -294,8 +319,8 @@ def _call_openai(
         choice = resp.choices[0]
         text = choice.message.content or ""
         usage = getattr(resp, "usage", None)
-        in_tok = int(getattr(usage, "prompt_tokens", 0)) if usage else 0
-        out_tok = int(getattr(usage, "completion_tokens", 0)) if usage else 0
+        in_tok = _safe_int(getattr(usage, "prompt_tokens", 0)) if usage else 0
+        out_tok = _safe_int(getattr(usage, "completion_tokens", 0)) if usage else 0
         return text, in_tok, out_tok
     except Exception as e:
         if _is_retryable(e):
