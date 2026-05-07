@@ -145,7 +145,7 @@ Walk-forward 2022-2024 on daily crypto bars, 7 majors with full history. See
 | `ema_ribbon_compression` (default) | **0** | 0% | — | — | — | **not promotable on daily** — needs 4h bars |
 | `funding_rate_divergence` | — | — | — | — | — | **untestable** — funding APIs only return ~100 recent records |
 
-**`ma_pullback_trend_crypto` clears every quantitative promotion gate.** Caveat: per-window Sharpe std is 2.90 (vs joined 0.97) — that's high regime sensitivity worth auditing before live deployment. Recommend a 2023-2024 slice separately to confirm it doesn't lean entirely on the 2022 bear-market mean reversion.
+**`ma_pullback_trend_crypto` clears every quantitative promotion gate ON 2022-2024.** Caveat: per-window Sharpe std is 2.90 (vs joined 0.97) — high regime sensitivity. **Followed up with extended 2020-2024 walk-forward (overnight): the strategy collapses to PF 0.99, Sharpe 0.30 once the 2020-2021 BTC bull is included.** The 2022-2024 win was flattered by the regime, not intrinsic edge. Both crypto strategies are mean-reversion plays that lose during sustained trends. **Do NOT promote based on the 2022-2024 numbers alone.** Full breakdown in the validation doc.
 
 **EMA Ribbon Compression generates zero trades on daily bars at default parameters** across 7 major crypto pairs over 3 years. Loosening params produces losing trades, not better trades. The proposal called for 4h bars; daily is too coarse for 0.5%-spread compression to set up. Keep it in paper as a research lane until 4h bar support lands; do not promote.
 
