@@ -133,6 +133,26 @@ First crypto_agent eval ran at **23:39:54** with the new code. Result from the j
 
 ---
 
+## Backtest validation (overnight)
+
+Walk-forward 2022-2024 on daily crypto bars, 7 majors with full history. See
+`docs/improvements/strategies/overnight_validation_2026-05-07.md` for full data + gate analysis.
+
+| Strategy | Trades | Return | Sharpe | PF | Max DD | Status |
+|---|---:|---:|---:|---:|---:|---|
+| `ma_pullback_trend_crypto` | 47 | +33.4% | 0.97 | 1.60 | 16.6% | **promotable** ✓ |
+| `failed_breakout_crypto` | 16 | +9.5% | 0.74 | 1.94 | 4.9% | needs more trades to clear n_trades gate |
+| `ema_ribbon_compression` (default) | **0** | 0% | — | — | — | **not promotable on daily** — needs 4h bars |
+| `funding_rate_divergence` | — | — | — | — | — | **untestable** — funding APIs only return ~100 recent records |
+
+**`ma_pullback_trend_crypto` clears every quantitative promotion gate.** Caveat: per-window Sharpe std is 2.90 (vs joined 0.97) — that's high regime sensitivity worth auditing before live deployment. Recommend a 2023-2024 slice separately to confirm it doesn't lean entirely on the 2022 bear-market mean reversion.
+
+**EMA Ribbon Compression generates zero trades on daily bars at default parameters** across 7 major crypto pairs over 3 years. Loosening params produces losing trades, not better trades. The proposal called for 4h bars; daily is too coarse for 0.5%-spread compression to set up. Keep it in paper as a research lane until 4h bar support lands; do not promote.
+
+**Funding Rate Divergence is shipped but unprovable from current data sources.** Binance is geo-blocked, Bybit returns 403, OKX caps at 100 records. To validate: either buffer funding-history into a parquet file (8h cadence ⇒ ~3 records/day; need 6 months for a meaningful sample) or pay for a historical funding endpoint.
+
+---
+
 ## What I deliberately didn't do (deferred)
 
 **`vwap_nyse_open_retest` (researcher proposal #3).** The strategy needs 5-minute crypto bars
