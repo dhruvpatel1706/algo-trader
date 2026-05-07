@@ -96,6 +96,30 @@ Full unit suite: **1312 passed, 1 skipped** (the skip is the optional native mod
 
 ---
 
+## Live verification (after 23:35 restart)
+
+First crypto_agent eval ran at **23:39:54** with the new code. Result from the journal:
+
+```json
+{"event":"autonomous_reasoner_eval","symbol":"DOGEUSDT",...,
+ "judgment":{"multiplier":1.0,"halt":false,
+ "reasoning":"LLM unavailable (... openai in cooldown (300s remaining))",
+ "fail_open":true}}
+
+{"event":"refusal","reason":"risk_cap_position","symbol":"DOGEUSDT",
+ "detail":"symbol already at single-position cap:
+  existing 10029.602911 >= 10% of equity 99487.58"}
+
+{"event":"agent_eval_complete","agent":"crypto_agent",
+ "n_signals":5,"n_submitted":0,"n_refused":5}
+```
+
+**Both overnight fixes verified live:**
+- ✅ **Cumulative cap (`bedc7bd`)** — 5/5 signals correctly refused; bot can no longer stack on top of over-cap positions.
+- ✅ **LLM cooldown (`83b67bc`)** — circuit breaker active; reasoner fails open with multiplier=1.0 instead of crashing.
+
+---
+
 ## Quick links
 
 - Dashboard: http://localhost:8000 (or your port)
