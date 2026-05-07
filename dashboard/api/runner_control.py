@@ -123,14 +123,25 @@ class RunnerSupervisor:
         if not _pid_matches_runner(pid):
             self._clear_pidfile()
             return
+        # Skip if we're already tracking this exact PID — re-adoption from
+        # the periodic status() path must be a no-op when nothing changed.
+        if (
+            self._proc is not None
+            and getattr(self._proc, "pid", None) == pid
+            and self._is_alive()
+        ):
+            return
         # Adopt: we don't know the exact start time, so use the log file's
-        # mtime as a conservative lower bound.
+        # mtime as a conservative lower bound. Clear the prior exit code so
+        # a stale "crashed" verdict from an earlier dead process doesn't
+        # bleed into the freshly-adopted runner's status.
         try:
             mtime = _LOGFILE.stat().st_mtime
             self._started_at = datetime.fromtimestamp(mtime, tz=UTC)
         except OSError:
             self._started_at = datetime.now(UTC)
         self._proc = _AdoptedProc(pid)
+        self._exit_code = None
         self._adopted = True
 
     # -- lifecycle ----------------------------------------------------------
@@ -220,6 +231,19 @@ class RunnerSupervisor:
             return self._status_locked()
 
     def _status_locked(self) -> RunnerStatus:
+        # Re-adopt before reporting. ``_adopt_orphan_if_present`` is only
+        # called once in __init__, so when an out-of-band restart happens
+        # (e.g. operator runs ``scripts/run_bot.py`` from a shell, or the
+        # adopted process exits and a fresh one is spawned by something
+        # else), our cached ``_proc`` becomes stale. The watchdog then
+        # asks /api/bot/status, sees ``state=crashed`` from our stale
+        # _AdoptedProc.returncode==-1 sentinel, and tries to restart a
+        # bot that is in fact running. Reconciling on every status read
+        # is cheap (one os.kill(pid, 0) when a pidfile exists) and keeps
+        # the supervisor honest about reality.
+        if not self._is_alive():
+            self._adopt_orphan_if_present()
+
         if self._is_alive():
             assert self._proc is not None
             assert self._started_at is not None

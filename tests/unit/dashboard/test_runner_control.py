@@ -226,3 +226,77 @@ def test_adopt_orphan_handles_missing_pidfile(runtime_paths):
     s = sup.status()
     assert s.state == "stopped"
     assert s.adopted is False
+
+
+def test_status_re_adopts_after_out_of_band_restart(
+    runtime_paths, tmp_path, monkeypatch
+):
+    """When the originally-tracked runner exits AND a new ``scripts/run_bot.py``
+    process is spawned out-of-band (operator restarts via shell, watchdog
+    relaunches, ...), subsequent ``status()`` calls must adopt the new PID
+    and report ``state="running"`` — NOT carry forward the stale "crashed"
+    verdict from the dead one. This is what made the watchdog cry "bot
+    crashed!" while the bot was demonstrably alive.
+    """
+    import subprocess
+    import textwrap as _tw
+    import time as _time
+
+    rc, runtime_dir = runtime_paths
+
+    # Fake run_bot.py so the cmdline-match check succeeds for both runs.
+    run_bot_script = tmp_path / "run_bot.py"
+    run_bot_script.write_text(
+        _tw.dedent(
+            """
+            import signal, sys, time
+            signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+            while True:
+                time.sleep(0.1)
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "_RUN_BOT", run_bot_script)
+
+    sup = rc.RunnerSupervisor()
+    first = sup.start()
+    first_pid = first.pid
+    assert first_pid is not None
+
+    # Kill the first runner and capture the resulting "crashed" verdict —
+    # _AdoptedProc.poll() can't observe SIGKILL exit codes, so the
+    # supervisor sees -1 and downgrades to "crashed".
+    sup.stop()
+    s_after_kill = sup.status()
+    assert s_after_kill.state in ("stopped", "crashed")
+
+    # Now spawn an entirely new runner out-of-band, write the new PID to
+    # the pidfile, and call status() again. The supervisor MUST re-adopt.
+    import sys as _sys
+    new_proc = subprocess.Popen(
+        [_sys.executable, str(run_bot_script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        # Mimic a real out-of-band start that wrote its PID to the file.
+        (runtime_dir / "runner.pid").write_text(
+            str(new_proc.pid), encoding="utf-8"
+        )
+        # Brief settle so the new process is fully alive.
+        _time.sleep(0.2)
+
+        s_after_new = sup.status()
+        assert s_after_new.state == "running", (
+            f"expected re-adoption, got {s_after_new.state} "
+            f"(exit_code={s_after_new.exit_code})"
+        )
+        assert s_after_new.pid == new_proc.pid
+        assert s_after_new.adopted is True
+    finally:
+        new_proc.terminate()
+        try:
+            new_proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            new_proc.kill()

@@ -273,9 +273,30 @@ def build_runner() -> tuple[Runner, JournalWriter, dict[str, Any]]:
     return runner, journal_writer, agents
 
 
+def _write_pidfile() -> None:
+    """Write our PID to ``live/runtime/runner.pid`` so out-of-band launches
+    (operator running this script directly, launchd, systemd) are still
+    discoverable by the dashboard's RunnerSupervisor. Without this the
+    supervisor's adoption path can't find us, /api/bot/status reports
+    ``stopped`` while the bot is plainly running, and the watchdog cries
+    wolf trying to "restart" a process that isn't crashed.
+
+    Best-effort: a permission error on the pidfile is annoying but must
+    not prevent the runner from starting.
+    """
+    pidfile = PROJECT_ROOT / "live" / "runtime" / "runner.pid"
+    try:
+        pidfile.parent.mkdir(parents=True, exist_ok=True)
+        pidfile.write_text(str(os.getpid()), encoding="utf-8")
+        log.info("wrote pidfile to %s (pid=%d)", pidfile, os.getpid())
+    except OSError as exc:  # pragma: no cover - defensive
+        log.warning("could not write pidfile %s: %s", pidfile, exc)
+
+
 def main() -> None:
     """Block-and-run. Returns only on graceful shutdown."""
     logging.basicConfig(level=logging.INFO)
+    _write_pidfile()
     _maybe_install_alerts()
     runner, _journal, _agents = build_runner()
     log.info("starting runner with %d job(s)", len(runner.jobs))
