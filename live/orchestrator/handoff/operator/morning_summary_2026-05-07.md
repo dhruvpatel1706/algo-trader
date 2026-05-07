@@ -128,5 +128,31 @@ First crypto_agent eval ran at **23:39:54** with the new code. Result from the j
 - Dashboard: http://localhost:8000 (or your port)
 - Bot log: `live/runtime/runner.log`
 - Today's journal: `journal/2026-05-07.jsonl`
-- New strategy: `src/strategies/ema_ribbon_compression.py`
+- New strategies: `src/strategies/ema_ribbon_compression.py`, `src/strategies/funding_rate_divergence.py`
 - Research proposals API: `GET /api/orchestrator/research_proposals`
+
+---
+
+## What I deliberately didn't do (deferred)
+
+**`vwap_nyse_open_retest` (researcher proposal #3).** The strategy needs 5-minute crypto bars
+(currently the cache pins to 1-day) AND can only fire 09:25–09:35 ET = 13:25–13:35 UTC, which
+is mid-morning your time. Building the 5m intraday infrastructure tonight while the bot is
+running risks destabilising the daily-bar cache used by every other strategy. Defer to a
+clean session — the proposal doc in the research worktree at
+`/Users/dhruvpatel/Desktop/algo-trader-research/docs/improvements/strategies/vwap_nyse_open_retest.md`
+spells out the exact rules.
+
+**`on_chain_whale_flow` (researcher proposal #4).** Needs a new `src/data/onchain.py` module
+on top of the existing alt-data layer + Etherscan API key. Bigger lift; not blocking anything
+running now.
+
+**Manual position trims.** ETH (37%), LTC (20%), BCH (16.7%), AVAX (15.7%) are over the
+single-position cap. The bot can't trim them — only reduce_only orders or the dashboard
+kill switch can. Decide your tolerance: ride the existing positions to their stops/targets
+(they're holding small unrealized losses, well within drawdown caps), OR trim to spec via
+Alpaca's web UI.
+
+**LLM provider top-up.** Gemini's free tier alone is enough to keep the reasoner alive at
+our paper-tier eval rate. While they're all dead the reasoner falls open and strategies
+trade WITHOUT LLM confidence scaling — bot still works, just blunter. Not urgent, not optional.
