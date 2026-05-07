@@ -102,9 +102,23 @@ DEFAULT_CHAIN: tuple[ModelSpec, ...] = (
 )
 
 
+# When a provider quota / billing / 5xx fires, skip it for this many seconds
+# before trying again. Without this the router was burning ~3s per signal eval
+# attempting 3 dead providers (network round-trip per attempt) at 60 evals/hour
+# across 3 providers = 180 wasted API attempts/hour. With the cooldown the
+# second attempt within a 5-min window short-circuits to an immediate fail-open.
+_PROVIDER_COOLDOWN_SEC = 300
+
+
 @dataclass(slots=True)
 class Router:
     chain: tuple[ModelSpec, ...] = field(default_factory=lambda: DEFAULT_CHAIN)
+    # Per-provider cooldown: provider -> monotonic timestamp at which it
+    # becomes eligible to try again. Mutated only via _mark_failed() and
+    # checked via _is_cooling_down(). Module-level (not per-instance) is a
+    # deliberate choice — circuits shared across Router instances so the
+    # autonomous reasoner and the sentiment classifier don't each maintain
+    # their own view of "is Gemini up right now?".
 
     def call(
         self,
@@ -119,12 +133,31 @@ class Router:
         ``temperature=0.0`` is the default because every place we use this in
         the bot wants deterministic output (sentiment classification, regime
         labels, strategy-scout grading). Override per-call if needed.
+
+        Per-provider cooldown: a provider that fails (any reason) is skipped
+        for ``_PROVIDER_COOLDOWN_SEC`` seconds on subsequent calls. Resets
+        automatically when the cooldown window elapses. Without this the
+        router wastes ~3s per signal eval calling dead providers — when all
+        three providers are quota-exhausted (Gemini free tier daily reset,
+        Anthropic billing, OpenAI quota) we'd otherwise burn 180 wasted
+        round-trips per hour.
         """
         last_error: Exception | None = None
         for spec in self.chain:
             api_key = os.environ.get(spec.api_key_env, "")
             if not api_key:
                 logger.debug("router: skipping %s — %s not set", spec.provider, spec.api_key_env)
+                continue
+            cooldown_remaining = _cooldown_remaining(spec.provider)
+            if cooldown_remaining > 0:
+                logger.debug(
+                    "router: skipping %s — cooldown for %.0fs more",
+                    spec.provider,
+                    cooldown_remaining,
+                )
+                last_error = LLMUnavailableError(
+                    f"{spec.provider} in cooldown ({cooldown_remaining:.0f}s remaining)"
+                )
                 continue
             for attempt in range(spec.max_retries + 1):
                 started = time.monotonic()
@@ -133,6 +166,9 @@ class Router:
                         spec, api_key=api_key, system=system, user=user,
                         max_tokens=max_tokens, temperature=temperature,
                     )
+                    # Success — clear any leftover cooldown so the next call
+                    # uses this provider as the primary again.
+                    _clear_cooldown(spec.provider)
                     return LLMResponse(
                         text=text,
                         provider=spec.provider,
@@ -146,6 +182,7 @@ class Router:
                     # Don't retry, fall through to the next in chain.
                     last_error = e
                     logger.warning("router: %s permanently unavailable: %s", spec.provider, e)
+                    _mark_failed(spec.provider)
                     break
                 except _RetryableError as e:
                     last_error = e
@@ -155,10 +192,52 @@ class Router:
                     logger.warning(
                         "router: %s retries exhausted: %s — falling through", spec.provider, e
                     )
+                    _mark_failed(spec.provider)
                     break
         raise LLMUnavailableError(
             f"all providers failed or skipped (last error: {last_error!r})"
         )
+
+
+# Module-level cooldown registry. Keyed by provider string; value is the
+# monotonic time at which the provider becomes eligible again. Anything
+# missing from the dict means "no cooldown active".
+_provider_cooldowns: dict[str, float] = {}
+
+
+def _mark_failed(provider: str) -> None:
+    """Put a provider on cooldown so subsequent calls skip it briefly."""
+    _provider_cooldowns[provider] = time.monotonic() + _PROVIDER_COOLDOWN_SEC
+
+
+def _clear_cooldown(provider: str) -> None:
+    """Reset cooldown after a successful call — provider is healthy again."""
+    _provider_cooldowns.pop(provider, None)
+
+
+def _cooldown_remaining(provider: str) -> float:
+    """Seconds left in the cooldown, or 0 if none / expired."""
+    eligible_at = _provider_cooldowns.get(provider)
+    if eligible_at is None:
+        return 0.0
+    remaining = eligible_at - time.monotonic()
+    if remaining <= 0:
+        # Auto-clear so the next call retries the provider fresh.
+        _provider_cooldowns.pop(provider, None)
+        return 0.0
+    return remaining
+
+
+def _is_cooling_down(provider: str) -> bool:
+    """Public-ish helper for tests + diagnostics."""
+    return _cooldown_remaining(provider) > 0
+
+
+def reset_cooldowns() -> None:
+    """Clear ALL provider cooldowns. Operator-grade tool — use after a
+    payment top-up or quota reset to skip the wait. Tests also call this
+    in fixtures to start each test with a clean slate."""
+    _provider_cooldowns.clear()
 
 
 _default_router: Router | None = None

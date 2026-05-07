@@ -19,7 +19,17 @@ from src.llm.router import (
     ModelSpec,
     Router,
     _is_retryable,
+    reset_cooldowns,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cooldowns():
+    """Clean cooldown state at the start AND end of every test so cooldown
+    behavior set by one test never leaks into the next."""
+    reset_cooldowns()
+    yield
+    reset_cooldowns()
 
 
 def _spec(provider: str, env: str = "TEST_KEY") -> ModelSpec:
@@ -156,3 +166,108 @@ def test_call_llm_returns_llmresponse_shape():
     assert r.model == "m"
     assert r.input_tokens == 0
     assert r.output_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# Per-provider cooldown circuit-breaker
+# ---------------------------------------------------------------------------
+
+
+def test_router_marks_provider_cooldown_after_failure(monkeypatch):
+    """After a retryable failure, subsequent calls within cooldown skip the
+    provider entirely without dispatching. Saves ~1s round-trip per dead
+    provider per signal eval; matters at 60 evals/hour across 3 providers."""
+    from src.llm.router import _is_cooling_down, _RetryableError
+
+    chain = (_spec("anthropic", "K_A"), _spec("gemini", "K_G"))
+    monkeypatch.setenv("K_A", "x")
+    monkeypatch.setenv("K_G", "x")
+
+    call_log: list[str] = []
+
+    def fake_dispatch(spec, *, api_key, system, user, max_tokens, temperature):
+        call_log.append(spec.provider)
+        if spec.provider == "anthropic":
+            raise _RetryableError("rate limited")
+        return ("gemini ok", 1, 1)
+
+    with patch("src.llm.router._dispatch", fake_dispatch):
+        # First call: anthropic fails, gemini succeeds.
+        r1 = Router(chain=chain).call(system="s", user="u")
+        assert r1.provider == "gemini"
+        assert call_log == ["anthropic", "gemini"]
+        # Anthropic should be on cooldown now.
+        assert _is_cooling_down("anthropic")
+        assert not _is_cooling_down("gemini")
+
+        # Second call within cooldown: anthropic must be skipped, gemini wins
+        # without dispatching anthropic again.
+        r2 = Router(chain=chain).call(system="s", user="u")
+        assert r2.provider == "gemini"
+        assert call_log == ["anthropic", "gemini", "gemini"], (
+            "anthropic should have been skipped on call 2 (cooldown)"
+        )
+
+
+def test_router_clears_cooldown_after_success(monkeypatch):
+    """A provider that recovers (e.g. Gemini quota window resets) should be
+    marked healthy again on its next successful call so we promote it back
+    to primary instead of staying on the fallback indefinitely."""
+    from src.llm.router import (
+        _is_cooling_down,
+        _mark_failed,
+    )
+
+    chain = (_spec("anthropic", "K_A"),)
+    monkeypatch.setenv("K_A", "x")
+
+    # Pre-mark anthropic as failed (simulating prior failure).
+    _mark_failed("anthropic")
+    assert _is_cooling_down("anthropic")
+
+    # ...but reset the cooldown so this test isn't blocked by the 5-min wait.
+    reset_cooldowns()
+
+    with patch("src.llm.router._dispatch", return_value=("ok", 1, 1)):
+        r = Router(chain=chain).call(system="s", user="u")
+    assert r.provider == "anthropic"
+    # Cooldown should be cleared after success.
+    assert not _is_cooling_down("anthropic")
+
+
+def test_router_raises_when_all_providers_in_cooldown(monkeypatch):
+    """If every provider in the chain is on cooldown, the router raises
+    immediately — no wasted dispatch attempts. Reasoner sees this as an
+    LLMUnavailableError and falls open (multiplier=1.0)."""
+    from src.llm.router import _mark_failed
+
+    chain = (_spec("anthropic", "K_A"), _spec("gemini", "K_G"))
+    monkeypatch.setenv("K_A", "x")
+    monkeypatch.setenv("K_G", "x")
+
+    _mark_failed("anthropic")
+    _mark_failed("gemini")
+
+    with patch("src.llm.router._dispatch") as dispatch:
+        with pytest.raises(LLMUnavailableError) as exc_info:
+            Router(chain=chain).call(system="s", user="u")
+    assert dispatch.call_count == 0, "should NOT dispatch when all in cooldown"
+    assert "cooldown" in str(exc_info.value).lower()
+
+
+def test_reset_cooldowns_clears_all_circuits():
+    """Operator-grade tool to skip the wait after a payment top-up."""
+    from src.llm.router import _is_cooling_down, _mark_failed
+
+    _mark_failed("anthropic")
+    _mark_failed("gemini")
+    _mark_failed("openai")
+    assert _is_cooling_down("anthropic")
+    assert _is_cooling_down("gemini")
+    assert _is_cooling_down("openai")
+
+    reset_cooldowns()
+
+    assert not _is_cooling_down("anthropic")
+    assert not _is_cooling_down("gemini")
+    assert not _is_cooling_down("openai")
