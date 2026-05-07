@@ -8,17 +8,19 @@ from src.data.universe import Universe
 from src.strategies.failed_breakout import FailedBreakout
 from src.strategies.ma_pullback_trend import MaPullbackTrend
 from src.strategies.mr_etf import MrEtf
+from src.strategies.vwap_open_retest import VwapOpenRetest
 
 
 def test_equity_agent_loads_default_strategies():
     Universe.reload()
     a = EquityAgent()
     names = {type(s).__name__ for s in a.strategies}
-    assert names == {"MrEtf", "MaPullbackTrend", "FailedBreakout"}
+    assert names == {"MrEtf", "MaPullbackTrend", "FailedBreakout", "VwapOpenRetest"}
     # individual instances
     assert any(isinstance(s, MrEtf) for s in a.strategies)
     assert any(isinstance(s, MaPullbackTrend) for s in a.strategies)
     assert any(isinstance(s, FailedBreakout) for s in a.strategies)
+    assert any(isinstance(s, VwapOpenRetest) for s in a.strategies)
 
 
 def test_equity_agent_default_universe_is_liquid_etfs():

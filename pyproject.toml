@@ -53,6 +53,8 @@ dependencies = [
   "google-genai>=1.75.0",
   "anthropic>=0.100.0",
   "openai>=2.35.0",
+  # Analyst layer — TradingView technical ratings (multi-timeframe, free public API).
+  "tradingview-ta>=3.3.0",
 ]
 
 [project.optional-dependencies]

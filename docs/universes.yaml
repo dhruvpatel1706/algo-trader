@@ -10,6 +10,16 @@
 #
 # Update this file rather than hard-coding lists in scripts.
 
+vwap_equity:
+  - SPY
+  - QQQ
+  - AAPL
+  - MSFT
+  - NVDA
+  - META
+  - GOOGL
+  - AMZN
+
 spy_qqq:
   - SPY
   - QQQ
@@ -91,6 +101,7 @@ index_etfs:
 # Universe.for_strategy(self.name) and gets the list keyed here. Default is
 # `spy_qqq` if a strategy is not listed.
 strategy_universes:
+  vwap_open_retest: vwap_equity
   mr_etf: spy_qqq
   wheel_etf: spy_qqq
   failed_breakout: liquid_etfs_top20

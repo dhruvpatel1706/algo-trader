@@ -401,6 +401,7 @@ class TradePipeline:
         self._reasoner = reasoner
         self._outcome_capture = outcome_capture
         self._compliance_auto_approve_reason = compliance_auto_approve_reason
+        self._pending_notional: dict[str, Decimal] = {}
 
     # -- public ----------------------------------------------------------
 
@@ -493,7 +494,7 @@ class TradePipeline:
 
     # -- per-signal processing ------------------------------------------
 
-    def _process_signal(
+    def _process_signal(  # noqa: PLR0915
         self,
         sig: Signal,
         agent: Agent,
@@ -573,8 +574,11 @@ class TradePipeline:
             decision = check_limits(
                 proposed,
                 snapshot,
-                existing_notional_in_symbol=_existing_notional_in_symbol(
-                    snapshot.open_positions, sig.symbol
+                existing_notional_in_symbol=(
+                    _existing_notional_in_symbol(snapshot.open_positions, sig.symbol)
+                    + self._pending_notional.get(
+                        _canonical_symbol(sig.symbol), Decimal("0")
+                    )
                 ),
             )
         except Exception as e:
@@ -755,6 +759,8 @@ class TradePipeline:
         except Exception as e:
             log.warning("trade_pipeline: journal write failed for submit: %s", e)
 
+        self._accumulate_pending(sig.symbol, qty, sig.entry)
+
         return ExecutionStep(
             symbol=sig.symbol,
             side=sig.side,
@@ -771,6 +777,19 @@ class TradePipeline:
         )
 
     # -- helpers ---------------------------------------------------------
+
+    def _accumulate_pending(self, symbol: str, qty: int | float, entry: Any) -> None:
+        """Record submitted-but-unfilled notional to block duplicate entries.
+
+        Broker position snapshots can lag several minutes on paper trading, so
+        we track pending notional in-process and include it when evaluating the
+        per-symbol concentration cap in subsequent cycles.
+        """
+        canon = _canonical_symbol(symbol)
+        self._pending_notional[canon] = (
+            self._pending_notional.get(canon, Decimal("0"))
+            + Decimal(str(qty)) * Decimal(str(entry))
+        )
 
     def _build_signal_context(
         self,

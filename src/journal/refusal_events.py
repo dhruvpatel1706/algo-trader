@@ -43,6 +43,7 @@ logger = logging.getLogger("algo_trader.refusals")
 RefusalReason = Literal[
     "reasoner_halt",
     "reasoner_dampened",
+    "regime_dampened",
     "risk_cap_position",
     "risk_cap_portfolio",
     "correlation_alarm",
@@ -61,6 +62,7 @@ RefusalReason = Literal[
 REFUSAL_REASONS: tuple[RefusalReason, ...] = (
     "reasoner_halt",
     "reasoner_dampened",
+    "regime_dampened",
     "risk_cap_position",
     "risk_cap_portfolio",
     "correlation_alarm",

@@ -102,6 +102,22 @@ def win_rate(trades: Sequence[TradeRecord]) -> float:
     return sum(1 for t in trades if t.pnl > 0) / len(trades)
 
 
+def pf_concentration(trades: Sequence[TradeRecord]) -> float:
+    """Single-trade share of total absolute P&L. Range [0, 1].
+
+    Promotion gate (`src/backtest/promotion.py`) requires ≤ 0.20 — if one
+    trade contributed > 20% of total |P&L|, the headline metrics are an
+    artifact of one fluke fill, not a robust edge.
+    """
+    if not trades:
+        return 0.0
+    abs_pnls = [abs(t.pnl) for t in trades]
+    total = sum(abs_pnls)
+    if total <= 0:
+        return 0.0
+    return max(abs_pnls) / total
+
+
 def summarize(equity: pd.Series, returns: pd.Series, trades: Sequence[TradeRecord]) -> dict:
     """Bundle the standard backtest metrics into one dict for JSON output."""
     return {
@@ -110,6 +126,7 @@ def summarize(equity: pd.Series, returns: pd.Series, trades: Sequence[TradeRecor
         "calmar": round(calmar(equity), 3),
         "max_dd": round(max_drawdown(equity), 4),
         "profit_factor": round(profit_factor(trades), 3),
+        "pf_concentration": round(pf_concentration(trades), 4),
         "expectancy": round(expectancy(trades), 4),
         "win_rate": round(win_rate(trades), 3),
         "n_trades": len(trades),

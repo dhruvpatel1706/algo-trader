@@ -116,6 +116,7 @@ def test_summarize_returns_all_keys():
         "start_equity",
         "end_equity",
         "total_return",
+        "pf_concentration",
     }
     assert set(s.keys()) == expected
     assert s["n_trades"] == 3

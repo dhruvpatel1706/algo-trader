@@ -178,10 +178,17 @@ class Router:
                         elapsed_ms=int((time.monotonic() - started) * 1000),
                     )
                 except _ProviderUnavailable as e:
-                    # Permanent for this provider (no SDK / bad creds).
-                    # Don't retry, fall through to the next in chain.
                     last_error = e
-                    logger.warning("router: %s permanently unavailable: %s", spec.provider, e)
+                    if _is_billing_error(e):
+                        logger.critical(
+                            "router: %s BILLING/CREDIT ERROR — top up to restore AI judgment: %s",
+                            spec.provider,
+                            e,
+                        )
+                    else:
+                        logger.warning(
+                            "router: %s permanently unavailable: %s", spec.provider, e
+                        )
                     _mark_failed(spec.provider)
                     break
                 except _RetryableError as e:
@@ -194,6 +201,10 @@ class Router:
                     )
                     _mark_failed(spec.provider)
                     break
+        logger.critical(
+            "router: ALL providers failed — bot is running fail_open (no AI judgment). "
+            "Check billing/quota for anthropic, gemini, openai."
+        )
         raise LLMUnavailableError(
             f"all providers failed or skipped (last error: {last_error!r})"
         )
@@ -407,8 +418,26 @@ def _call_openai(
         raise _ProviderUnavailable(str(e)) from e
 
 
+_BILLING_TOKENS = (
+    "credit balance",
+    "billing",
+    "payment",
+    "insufficient_quota",
+    "quota exceeded",
+    "resource_exhausted",
+)
+
+
+def _is_billing_error(exc: Exception) -> bool:
+    """True for hard billing/quota failures that won't resolve without manual action."""
+    msg = str(exc).lower()
+    return any(tok in msg for tok in _BILLING_TOKENS)
+
+
 def _is_retryable(exc: Exception) -> bool:
-    """Classify any provider exception. Retryable: rate limit, 5xx, timeout."""
+    """Classify any provider exception. Retryable: transient rate limit, 5xx, timeout."""
+    if _is_billing_error(exc):
+        return False
     msg = str(exc).lower()
     cls = type(exc).__name__.lower()
     retryable_tokens = (

@@ -17,6 +17,7 @@ from src.strategies.base import Signal, Strategy
 from src.strategies.failed_breakout import FailedBreakout
 from src.strategies.ma_pullback_trend import MaPullbackTrend
 from src.strategies.mr_etf import MrEtf
+from src.strategies.vwap_open_retest import VwapOpenRetest
 
 
 class EquityAgent(Agent):
@@ -32,7 +33,7 @@ class EquityAgent(Agent):
         heat_allocation: float = 0.0,
     ) -> None:
         if strategies is None:
-            strategies = [MrEtf(), MaPullbackTrend(), FailedBreakout()]
+            strategies = [MrEtf(), MaPullbackTrend(), FailedBreakout(), VwapOpenRetest()]
         if universe is None:
             universe = Universe.named("liquid_etfs_top20")
         super().__init__(strategies=strategies, universe=universe, heat_allocation=heat_allocation)
