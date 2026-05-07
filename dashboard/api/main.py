@@ -61,6 +61,7 @@ from dashboard.api.runner_control import (
     status_to_dict,
 )
 from dashboard.api.state import DashboardState, get_state
+from dashboard.api.orchestrator import router as orchestrator_router
 from dashboard.api.trade_export import router as trade_export_router
 
 log = logging.getLogger(__name__)
@@ -85,6 +86,8 @@ app.include_router(refusal_router)
 app.include_router(trade_export_router)
 # Feeds status: which API keys / integrations are configured.
 app.include_router(feeds_status_router)
+# Orchestrator session state: read-only view of all Claude sessions.
+app.include_router(orchestrator_router)
 
 
 class KillRequest(BaseModel):

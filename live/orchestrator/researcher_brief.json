@@ -1,0 +1,63 @@
+{
+  "session": 1,
+  "last_run_utc": "2026-05-07T02:51:17.663980+00:00",
+  "high_confluence_ideas": [],
+  "notes": "First researcher session \u2014 no prior brief.",
+  "scan_results_summary": [
+    {
+      "symbol": "BTCUSDT",
+      "confluence": 0.225,
+      "direction": "long"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "confluence": 0.45,
+      "direction": "long"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "confluence": 0.0,
+      "direction": "neutral"
+    },
+    {
+      "symbol": "AVAXUSDT",
+      "confluence": 0.3,
+      "direction": "long"
+    },
+    {
+      "symbol": "LINKUSDT",
+      "confluence": 0.0,
+      "direction": "neutral"
+    },
+    {
+      "symbol": "LTCUSDT",
+      "confluence": 0.225,
+      "direction": "long"
+    },
+    {
+      "symbol": "BCHUSDT",
+      "confluence": 0.0,
+      "direction": "neutral"
+    },
+    {
+      "symbol": "XRPUSDT",
+      "confluence": 0.225,
+      "direction": "long"
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "confluence": 0.59,
+      "direction": "long"
+    },
+    {
+      "symbol": "AAVEUSDT",
+      "confluence": 0.225,
+      "direction": "long"
+    },
+    {
+      "symbol": "UNIUSDT",
+      "confluence": 0.0,
+      "direction": "neutral"
+    }
+  ]
+}

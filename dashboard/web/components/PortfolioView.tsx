@@ -69,6 +69,14 @@ const AnalyticsPanel = dynamic(
   },
 );
 
+const OrchestratorPanel = dynamic(
+  () => import("@/components/OrchestratorPanel").then((m) => m.OrchestratorPanel),
+  {
+    ssr: false,
+    loading: () => <div className="h-32 rounded-2xl border border-border bg-surface" />,
+  },
+);
+
 export function PortfolioView() {
   return (
     <>
@@ -101,6 +109,8 @@ export function PortfolioView() {
         <LiveTradesFeed />
 
         <AnalyticsPanel />
+
+        <OrchestratorPanel />
 
         <LivePositionsTable />
 
