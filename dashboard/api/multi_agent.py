@@ -22,6 +22,7 @@ import logging
 import math
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -374,12 +375,25 @@ def _coherence_from_journal(strategy: str) -> tuple[float | None, float | None]:
 @router.get("/api/agents", response_model=list[AgentSummary])
 async def list_agents() -> list[AgentSummary]:
     """Per-agent: name, asset_class, state, heat_allocation, coherence,
-    n_open_positions, last_eval_ts."""
+    n_open_positions, last_eval_ts.
+
+    ``n_open_positions`` overrides the agent's own in-process counter with
+    a live count from the broker, attributed by symbol via
+    ``_resolve_agent_for_symbol``. Without this override, every agent
+    reads ``n_open_positions=0`` after a bot restart because the in-process
+    counter doesn't survive process death — the broker still holds the
+    positions but the agent has forgotten about them.
+    """
     agents = _build_agents()
+    broker_counts = _live_position_counts_by_agent()
     out: list[AgentSummary] = []
     for agent in agents:
         try:
             status = agent.status()
+            n_open = max(
+                int(status.n_open_positions or 0),
+                broker_counts.get(status.name, 0),
+            )
             out.append(
                 AgentSummary(
                     name=status.name,
@@ -389,7 +403,7 @@ async def list_agents() -> list[AgentSummary]:
                     state=status.state,
                     heat_allocation=status.heat_allocation,
                     coherence=_coherence_or_none(status.coherence),
-                    n_open_positions=status.n_open_positions,
+                    n_open_positions=n_open,
                     last_eval_ts=status.last_eval_ts.isoformat()
                     if status.last_eval_ts
                     else None,
@@ -398,6 +412,31 @@ async def list_agents() -> list[AgentSummary]:
         except Exception as exc:  # pragma: no cover - defensive
             log.debug("agent %r status() failed: %s", agent, exc)
     return out
+
+
+def _live_position_counts_by_agent() -> dict[str, int]:
+    """Best-effort: ask the broker for current positions, attribute each to
+    the agent that owns its universe, return per-agent counts. Returns an
+    empty dict if the broker can't be reached so the caller falls back to
+    the in-process counter cleanly.
+    """
+    try:
+        from dashboard.api.broker_proxy import get_broker_proxy
+
+        broker = get_broker_proxy()
+        positions = broker.get_positions() or []
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("live position count fallback failed: %s", exc)
+        return {}
+    counts: dict[str, int] = {}
+    for p in positions:
+        if not isinstance(p, dict):
+            continue
+        agent_name = _resolve_agent_for_symbol(p.get("symbol", ""))
+        if not agent_name:
+            continue
+        counts[agent_name] = counts.get(agent_name, 0) + 1
+    return counts
 
 
 @router.get("/api/portfolio/equity", response_model=PortfolioEquityResponse)
@@ -539,6 +578,99 @@ def _to_data_api_symbol(symbol: str) -> str:
     return symbol
 
 
+# Asset-class -> agent name lookup. The universes block in docs/universes.yaml
+# is the source of truth for symbol membership; this dict only maps the broad
+# bucket to the agent that owns the bucket.
+_ASSET_CLASS_AGENT: dict[str, str] = {
+    "crypto": "crypto_agent",
+    "gold": "gold_agent",
+    "silver": "silver_agent",
+    "bonds": "bonds_agent",
+    "equity": "equity_agent",
+}
+
+
+@lru_cache(maxsize=1)
+def _symbol_to_asset_class_map() -> dict[str, str]:
+    """Build a lazy, cached canonical-symbol -> asset-class lookup table by
+    walking the universes defined in docs/universes.yaml. Crypto symbols
+    are normalised to ``XYZUSD`` form so 'ETHUSD' / 'ETHUSDT' / 'ETH/USD'
+    all map to the same asset class.
+
+    Order matters: more-specific universes (crypto_majors, gold, silver,
+    bonds) take precedence over the generic equity catch-all so a symbol
+    that appears in both ``liquid_etfs_top20`` (e.g. GLD) and ``gold``
+    resolves to gold.
+    """
+    from src.data.universe import Universe
+
+    out: dict[str, str] = {}
+    # Specific buckets first.
+    bucket_universes: list[tuple[str, str]] = [
+        ("crypto", "crypto_majors"),
+        ("gold", "gold"),
+        ("silver", "silver"),
+        ("bonds", "bonds"),
+    ]
+    for asset_class, universe_name in bucket_universes:
+        try:
+            symbols = Universe.named(universe_name)
+        except Exception as exc:
+            log.debug("symbol map: skipping %r: %s", universe_name, exc)
+            continue
+        for sym in symbols:
+            for variant in _symbol_variants(sym):
+                out.setdefault(variant, asset_class)
+    # Generic equity universes — anything not already classified is equity.
+    for equity_universe in ("liquid_etfs_top20", "large_caps_50", "spy_qqq"):
+        try:
+            symbols = Universe.named(equity_universe)
+        except Exception as exc:
+            log.debug("symbol map: skipping %r: %s", equity_universe, exc)
+            continue
+        for sym in symbols:
+            for variant in _symbol_variants(sym):
+                out.setdefault(variant, "equity")
+    return out
+
+
+def _symbol_variants(symbol: str) -> tuple[str, ...]:
+    """All canonical-equivalent shapes for a symbol so the lookup table
+    matches whatever the broker reports. ETHUSDT -> {ETHUSDT, ETHUSD,
+    ETH/USD}. AAPL -> {AAPL}. Always returns the input verbatim plus any
+    quote-currency variants for crypto."""
+    s = symbol.upper().replace("-", "")
+    out: set[str] = {s}
+    flat = s.replace("/", "")
+    out.add(flat)
+    for quote in ("USDT", "USDC", "USD"):
+        if flat.endswith(quote) and len(flat) > len(quote):
+            base = flat[: -len(quote)]
+            out.update({f"{base}USDT", f"{base}USDC", f"{base}USD", f"{base}/USD"})
+            break
+    return tuple(out)
+
+
+def _resolve_agent_for_symbol(symbol: str) -> str | None:
+    """Return the agent name owning ``symbol`` based on universe membership,
+    or ``None`` when the symbol isn't in any tracked universe.
+
+    Used by /api/positions/live to attribute broker-reported positions to
+    the agent that opened them — broker dicts have no agent field, so
+    without this every position rendered as ``agent=null`` and the per-
+    agent dashboard stats stayed pinned at zero.
+    """
+    if not symbol:
+        return None
+    table = _symbol_to_asset_class_map()
+    asset_class = table.get(symbol.upper().replace("-", "")) or table.get(
+        symbol.upper().replace("-", "").replace("/", "")
+    )
+    if asset_class is None:
+        return None
+    return _ASSET_CLASS_AGENT.get(asset_class)
+
+
 @router.get("/api/positions/live", response_model=list[LivePosition])
 async def positions_live() -> list[LivePosition]:
     """Currently-open positions with live mark, unrealized P&L, distance-to-stop.
@@ -610,7 +742,7 @@ async def positions_live() -> list[LivePosition]:
                     unrealized_plpc=unrealized_plpc,
                     distance_to_stop=distance,
                     side=str(p.get("side", "long")).lower(),
-                    agent=p.get("agent"),
+                    agent=p.get("agent") or _resolve_agent_for_symbol(symbol),
                     mark_as_of=mark_as_of,
                     mark_source=mark_source,
                 )

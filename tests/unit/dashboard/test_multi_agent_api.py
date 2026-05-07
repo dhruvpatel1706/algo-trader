@@ -92,6 +92,32 @@ def test_positions_live_returns_200(client: TestClient) -> None:
     assert isinstance(r.json(), list)
 
 
+def test_resolve_agent_for_symbol_covers_all_asset_classes() -> None:
+    """The dashboard's symbol -> agent resolver attributes broker-reported
+    positions back to the agent that owns the universe. Without this, every
+    position rendered ``agent=null`` on /api/positions/live and per-agent
+    dashboard stats stayed pinned at zero open positions.
+    """
+    from dashboard.api.multi_agent import _resolve_agent_for_symbol
+
+    # Crypto (multi-shape: trading-API form, data-API form, internal USDT form).
+    assert _resolve_agent_for_symbol("ETHUSD") == "crypto_agent"
+    assert _resolve_agent_for_symbol("ETH/USD") == "crypto_agent"
+    assert _resolve_agent_for_symbol("ETHUSDT") == "crypto_agent"
+    assert _resolve_agent_for_symbol("BTCUSD") == "crypto_agent"
+    assert _resolve_agent_for_symbol("DOGEUSDT") == "crypto_agent"
+    # Specific buckets win over the generic equity catch-all.
+    assert _resolve_agent_for_symbol("GLD") == "gold_agent"
+    assert _resolve_agent_for_symbol("SLV") == "silver_agent"
+    assert _resolve_agent_for_symbol("TLT") == "bonds_agent"
+    # Equity catch-all.
+    assert _resolve_agent_for_symbol("AAPL") == "equity_agent"
+    assert _resolve_agent_for_symbol("SPY") == "equity_agent"
+    # Unknown symbol -> None (don't fabricate attribution).
+    assert _resolve_agent_for_symbol("THIS_TICKER_DOES_NOT_EXIST") is None
+    assert _resolve_agent_for_symbol("") is None
+
+
 # ----- /api/signals/recent -----
 
 
