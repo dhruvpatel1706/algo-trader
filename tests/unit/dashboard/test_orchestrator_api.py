@@ -231,9 +231,11 @@ def test_research_proposals_empty_when_no_brief(client: TestClient):
 
 def test_research_proposals_marks_implemented_strategies(client: TestClient):
     """A proposal whose slug maps to an existing src/strategies/<slug>.py
-    must surface as status='implemented'. We use ema_ribbon_compression
-    (which IS shipped) and confirm the suffix-stripping picks it up from
-    the proposal slug 'ema_ribbon_compression_breakout'."""
+    must surface as status='implemented'. The pre-existing path is
+    ema_ribbon_compression (shipped 2026-05-07); suffix-stripping must
+    pick it up from the proposal slug 'ema_ribbon_compression_breakout'.
+    The other slug deliberately doesn't exist on disk to verify the
+    'proposed' branch."""
     from dashboard.api import orchestrator as m
 
     _write_researcher_brief(
@@ -243,8 +245,7 @@ def test_research_proposals_marks_implemented_strategies(client: TestClient):
             "new_strategy_proposals": {
                 "priority_order": [
                     "1. ema_ribbon_compression_breakout — shipped today",
-                    "2. funding_rate_divergence — needs Bybit fallback",
-                    "3. on_chain_whale_flow — needs new data source",
+                    "2. on_chain_whale_flow — needs new data source",
                 ],
             },
         },
@@ -252,7 +253,6 @@ def test_research_proposals_marks_implemented_strategies(client: TestClient):
     body = client.get("/api/orchestrator/research_proposals").json()
     by_slug = {p["slug"]: p for p in body["proposals"]}
     assert by_slug["ema_ribbon_compression_breakout"]["status"] == "implemented"
-    assert by_slug["funding_rate_divergence"]["status"] == "proposed"
     assert by_slug["on_chain_whale_flow"]["status"] == "proposed"
     # rank preserved from priority_order
     assert by_slug["ema_ribbon_compression_breakout"]["rank"] == 1
