@@ -1,9 +1,9 @@
 """Regime-conditional exposure scalar.
 
 Maps the current SPY-derived macro regime onto a per-strategy size multiplier.
-This is the single largest lever for compressing per-window Sharpe std/mean —
+This is the single largest lever for compressing per-window Sharpe std/mean -
 every strategy on the 2026-05-07 leaderboard fails the stability gate
-(`per_window_std/|mean| ≤ 0.50`) at 2.7–9.5×. The strategies work in their
+(`per_window_std/|mean| <= 0.50`) at 2.7-9.5x. The strategies work in their
 native regime and bleed in others; suppressing exposure when the regime is
 hostile is the structural fix.
 
@@ -34,7 +34,6 @@ from src.strategies.macro_regime_filter import (
     RegimeClassification,
     classify_regime,
 )
-
 
 # Strategy classes by behavior. New strategies should be added to whichever
 # bucket matches their dominant edge; missing strategies default to 1.0

@@ -1,0 +1,34 @@
+{
+  "role": "backtester",
+  "run_date": "2026-05-07",
+  "started_at": "2026-05-07T14:14:55.040115+00:00",
+  "finished_at": "2026-05-07T15:26:53.983033+00:00",
+  "elapsed_seconds": 4319,
+  "combos_attempted": 7,
+  "combos_completed": 7,
+  "combos_skipped": 0,
+  "leaderboard_path": "/Users/dhruvpatel/Desktop/algo-trader/live/orchestrator/backtests/leaderboard.json",
+  "nightly_dir": "/Users/dhruvpatel/Desktop/algo-trader/backtests/nightly/2026-05-07",
+  "incidents": [],
+  "top_3": [
+    {
+      "strategy": "mr_etf",
+      "universe": "spy_qqq",
+      "sharpe": 0.794,
+      "decision": "reject"
+    },
+    {
+      "strategy": "momentum_xs",
+      "universe": "large_caps_50",
+      "sharpe": 0.747,
+      "decision": "reject"
+    },
+    {
+      "strategy": "ma_pullback_trend",
+      "universe": "large_caps_50",
+      "sharpe": 0.664,
+      "decision": "marginal"
+    }
+  ],
+  "next_run": "2026-05-08T04:00:00Z"
+}

@@ -44,12 +44,15 @@ from src.agents.base import Agent, AssetClass
 from src.execution.broker import ApprovalToken, BrokerSubmitError, PaperBroker
 from src.execution.orders import Order, Submission
 from src.journal.refusal_events import RefusalReason, log_refusal
+from src.risk.concentration import concentration_breaches
 from src.risk.limits import (
     PortfolioSnapshot,
     ProposedTrade,
     check_limits,
 )
+from src.risk.regime_scalar import regime_scalar_for_strategy
 from src.runtime.symbol_map import map_symbol_for_broker
+from src.strategies.macro_regime_filter import classify_regime
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import pandas as pd
@@ -75,6 +78,18 @@ __all__ = [
 # observability surfaces agree.
 _DAMPENED_REFUSAL_THRESHOLD: float = 0.7
 
+# A regime scalar at or below this value flips the signal from "dampen" to
+# "refuse". 0.4 is the boundary between "modest reduction" (0.5-0.9) and
+# "wrong-regime, should not fire" (0.3 mean-reversion in clean trend).
+_REGIME_REFUSAL_THRESHOLD: float = 0.4
+
+# Concentration alarm threshold — emit ``cap_breach_alert`` when any single
+# symbol exceeds this fraction of equity. Distinct from the per-symbol cap
+# (10%) which prevents new entries; this catches drift on already-held
+# positions. 30% matches the watcher's existing alarm so the dashboard and
+# the journal agree on what counts as concerning.
+_CONCENTRATION_ALARM_THRESHOLD: float = 0.30
+
 # Maximum recent bars surfaced to the reasoner per signal. Larger context =
 # larger LLM cost; the reasoner's own ``MAX_CONTEXT_BARS`` is also 20.
 _RECENT_BARS_FOR_REASONER: int = 20
@@ -99,12 +114,18 @@ class ExecutionStep:
     rule_confidence: float
     reasoner_multiplier: float | None  # None when reasoner not configured
     reasoner_halt: bool  # True if the reasoner vetoed
-    final_confidence: float  # rule_confidence * (multiplier or 1.0)
+    final_confidence: float  # rule_confidence * (multiplier or 1.0) * regime_scalar
     risk_decision_reason: str | None
     submitted: bool
     submission: Submission | None
     refusal_reason: str | None  # one of RefusalReason values, if not submitted
     refusal_detail: str | None
+    # Regime context. ``regime_scalar`` is the multiplier applied; 1.0 means
+    # no scaling (regime not computable, asset class skipped, or strategy
+    # unknown to the regime mapper). ``regime_label`` is the SPY-derived
+    # label that produced the scalar (None when scalar=1.0 by default).
+    regime_scalar: float = 1.0
+    regime_label: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict for journal / dashboard use."""
@@ -390,6 +411,7 @@ class TradePipeline:
         snapshot_provider: PortfolioSnapshotProvider,
         *,
         reasoner: Any = None,
+        analyst: Any = None,
         outcome_capture: Any = None,
         compliance_auto_approve_reason: str = (
             "v1 equity has no compliance gate beyond risk"
@@ -399,9 +421,20 @@ class TradePipeline:
         self._journal = journal_writer
         self._snapshot_provider = snapshot_provider
         self._reasoner = reasoner
+        # Optional pre-trade analyst (see :mod:`src.agents.analyst`).
+        # Runs BEFORE the reasoner: hard veto bypasses the rest of the
+        # pipeline; otherwise the analyst's multiplier is combined
+        # multiplicatively with the reasoner's multiplier. Lets the
+        # analyst's multi-timeframe TV ratings + chart context veto
+        # demonstrably bad setups before any LLM cost is incurred.
+        self._analyst = analyst
         self._outcome_capture = outcome_capture
         self._compliance_auto_approve_reason = compliance_auto_approve_reason
         self._pending_notional: dict[str, Decimal] = {}
+        # Set per-cycle by ``run_for`` and read by ``_process_signal``. None
+        # means the regime wasn't computable (no SPY in bars, crypto agent,
+        # short history) so the regime scalar is 1.0 throughout the cycle.
+        self._cycle_regime: Any = None
 
     # -- public ----------------------------------------------------------
 
@@ -427,6 +460,63 @@ class TradePipeline:
         # capture knows which positions closed. This is best-effort in v1
         # because we don't have entry-time tracking plumbed everywhere.
         before_positions = self._open_position_symbols()
+
+        # Pre-cycle concentration alarm. The 10% per-symbol cap in
+        # ``check_limits`` blocks new entries that would push past cap, but
+        # already-held positions can drift past 30% via mark-to-market — the
+        # operator-flatten incident at 2026-05-07T15:35 was preceded by 13h
+        # of ETH at 37% with no first-class alarm event in the journal.
+        # Emit one ``cap_breach_alert`` per breach, then continue trading
+        # — this is observability, not a halt. Strategy-level halts are an
+        # operator decision.
+        try:
+            snap_for_alert = self._snapshot_provider.snapshot()
+            for breach in concentration_breaches(
+                snap_for_alert.open_positions,
+                snap_for_alert.equity,
+                threshold=_CONCENTRATION_ALARM_THRESHOLD,
+            ):
+                try:
+                    self._journal.write(
+                        {
+                            "event": "cap_breach_alert",
+                            "ts": datetime.now(UTC).isoformat(),
+                            "symbol": breach.symbol,
+                            "fraction": round(breach.fraction, 4),
+                            "threshold": breach.threshold,
+                            "notional": str(breach.notional),
+                            "equity": str(breach.equity),
+                            "agent": agent.name,
+                        }
+                    )
+                except Exception:
+                    log.exception("trade_pipeline: cap_breach_alert journal write failed")
+                log.warning(
+                    "concentration breach: %s at %.1f%% of equity (threshold %.0f%%)",
+                    breach.symbol,
+                    breach.fraction * 100.0,
+                    breach.threshold * 100.0,
+                )
+        except Exception:
+            log.exception("trade_pipeline: pre-cycle concentration check raised; continuing")
+
+        # Compute the macro regime once per cycle. The classifier is a pure
+        # function over SPY bars; per-signal recomputation is wasted work.
+        # Stored on ``self`` so ``_process_signal`` can read it without
+        # threading it through the call stack.
+        #
+        # Skip when the agent's asset class isn't equity-aligned (crypto runs
+        # against a different regime structure — BTC dominance, funding) or
+        # when SPY isn't in the bars dict (regime would fall through to a
+        # misleading first-ticker fallback).
+        self._cycle_regime = None
+        try:
+            ac = str(getattr(agent, "asset_class", "equity"))
+            if ac != "crypto" and bars and "SPY" in bars:
+                self._cycle_regime = classify_regime(bars)
+        except Exception:
+            log.exception("trade_pipeline: regime classify raised; continuing without regime")
+            self._cycle_regime = None
 
         try:
             signals = list(agent.evaluate(bars))
@@ -494,7 +584,7 @@ class TradePipeline:
 
     # -- per-signal processing ------------------------------------------
 
-    def _process_signal(  # noqa: PLR0915
+    def _process_signal(  # noqa: PLR0915, PLR0912
         self,
         sig: Signal,
         agent: Agent,
@@ -507,6 +597,60 @@ class TradePipeline:
         report.
         """
         snapshot = self._snapshot_provider.snapshot()
+
+        # ----- Analyst (pre-trade review) --------------------------------
+        # Runs BEFORE the LLM reasoner. Hard veto = refuse here, so the
+        # reasoner's LLM call is never spent on a setup we won't take.
+        # The analyst's multiplier (0.5..1.2) becomes the seed for the
+        # final confidence; the reasoner's multiplier composes on top.
+        analyst_multiplier: float = 1.0
+        analyst_verdict: Any = None
+        if self._analyst is not None:
+            ctx_for_analyst = self._build_signal_context(sig, agent, bars, snapshot)
+            try:
+                analyst_verdict = self._analyst.evaluate(sig, ctx_for_analyst)
+            except Exception as e:
+                log.warning(
+                    "trade_pipeline: analyst raised for %s; treating as no-veto: %s",
+                    sig.symbol, e,
+                )
+                analyst_verdict = None
+            if analyst_verdict is not None:
+                if not analyst_verdict.accept:
+                    self._log_refusal_safely(
+                        reason="analyst_veto",
+                        symbol=sig.symbol,
+                        side=sig.side,
+                        strategy=sig.strategy_tag,
+                        agent_name=agent.name,
+                        detail=analyst_verdict.veto_reason or analyst_verdict.reasoning,
+                        extra={
+                            "multiplier": analyst_verdict.multiplier,
+                            "win_probability": analyst_verdict.win_probability,
+                            "expected_r": analyst_verdict.expected_r,
+                            "tv_ratings": [
+                                {
+                                    "tf": r.timeframe,
+                                    "reco": r.recommendation,
+                                    "buy": r.buy,
+                                    "sell": r.sell,
+                                    "neutral": r.neutral,
+                                }
+                                for r in (analyst_verdict.timeframe_ratings or [])
+                            ],
+                            "source": analyst_verdict.source,
+                        },
+                    )
+                    return _refused_step(
+                        sig,
+                        reasoner_multiplier=None,
+                        reasoner_halt=True,
+                        final_confidence=0.0,
+                        refusal_reason="analyst_veto",
+                        refusal_detail=analyst_verdict.veto_reason
+                        or analyst_verdict.reasoning,
+                    )
+                analyst_multiplier = float(analyst_verdict.multiplier)
 
         # ----- Reasoner --------------------------------------------------
         reasoner_multiplier: float | None = None
@@ -558,8 +702,62 @@ class TradePipeline:
                     },
                 )
 
-        applied_multiplier = reasoner_multiplier if reasoner_multiplier is not None else 1.0
-        final_confidence = max(0.0, min(1.0, float(sig.confidence) * applied_multiplier))
+        # Final multiplier = analyst x reasoner. Analyst contributes
+        # 0.5..1.2 from TV multi-timeframe alignment; reasoner contributes
+        # 0..1 from LLM judgment. Both default to 1.0 when absent.
+        _reasoner_part = (
+            reasoner_multiplier if reasoner_multiplier is not None else 1.0
+        )
+        applied_multiplier = analyst_multiplier * _reasoner_part
+
+        # ----- Regime scalar --------------------------------------------
+        # Apply the SPY-derived macro-regime exposure multiplier on top of
+        # the reasoner's judgment. Mean-reversion in clean trends and
+        # trend-following in chop both bleed; suppressing exposure here is
+        # the structural fix for the per-window Sharpe std/mean failures.
+        regime = self._cycle_regime
+        regime_scalar = 1.0
+        regime_label: str | None = None
+        if regime is not None:
+            regime_scalar = regime_scalar_for_strategy(sig.strategy_tag, regime)
+            regime_label = regime.label
+
+        if regime_scalar <= _REGIME_REFUSAL_THRESHOLD:
+            detail = (
+                f"regime scalar {regime_scalar:.2f} <= refusal threshold "
+                f"{_REGIME_REFUSAL_THRESHOLD:.2f} "
+                f"(strategy={sig.strategy_tag}, regime={regime_label})"
+            )
+            self._log_refusal_safely(
+                reason="regime_dampened",
+                symbol=sig.symbol,
+                side=sig.side,
+                strategy=sig.strategy_tag,
+                agent_name=agent.name,
+                detail=detail,
+                extra={
+                    "regime_scalar": regime_scalar,
+                    "regime_label": regime_label,
+                    "threshold": _REGIME_REFUSAL_THRESHOLD,
+                },
+            )
+            return _refused_step(
+                sig,
+                reasoner_multiplier=reasoner_multiplier,
+                reasoner_halt=False,
+                final_confidence=max(
+                    0.0, min(1.0, float(sig.confidence) * applied_multiplier * regime_scalar)
+                ),
+                refusal_reason="regime_dampened",
+                refusal_detail=detail,
+                risk_decision_reason=detail,
+                regime_scalar=regime_scalar,
+                regime_label=regime_label,
+            )
+
+        final_confidence = max(
+            0.0, min(1.0, float(sig.confidence) * applied_multiplier * regime_scalar)
+        )
 
         # ----- Risk gate -------------------------------------------------
         proposed = ProposedTrade(
@@ -774,6 +972,8 @@ class TradePipeline:
             submission=submission,
             refusal_reason=None,
             refusal_detail=None,
+            regime_scalar=regime_scalar,
+            regime_label=regime_label,
         )
 
     # -- helpers ---------------------------------------------------------
@@ -1021,6 +1221,8 @@ def _refused_step(
     refusal_reason: RefusalReason,
     refusal_detail: str,
     risk_decision_reason: str | None = None,
+    regime_scalar: float = 1.0,
+    regime_label: str | None = None,
 ) -> ExecutionStep:
     """Build an ``ExecutionStep`` for a refused signal."""
     return ExecutionStep(
@@ -1036,4 +1238,6 @@ def _refused_step(
         submission=None,
         refusal_reason=refusal_reason,
         refusal_detail=refusal_detail,
+        regime_scalar=regime_scalar,
+        regime_label=regime_label,
     )

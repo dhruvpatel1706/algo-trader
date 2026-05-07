@@ -1,33 +1,320 @@
 {
-  "session": 1,
-  "last_run_utc": "2026-05-07T02:51:17.663980+00:00",
+  "session": 6,
+  "last_run_utc": "2026-05-07T16:54:09.786717+00:00",
+  "next_run_scheduled_utc": "2026-05-07T17:54:00Z",
+  "data_source": "yfinance (Binance HTTP 451 + Bybit HTTP 403 — both geo-blocked permanently on this IP)",
+  "funding_data": "unavailable — both Binance (451) and Bybit (403) geo-blocked. Funding zeroed all sessions.",
   "high_confluence_ideas": [],
-  "notes": "First researcher session \u2014 no prior brief.",
-  "scan_results_summary": [
+  "threshold": 0.7,
+  "notes": "Session 6. DOGE daily MACD crossed positive between S5 and S6 (hist: −0.000250 S5 → +0.001270 prev daily → +0.000783 current daily). The cross happened on the DAILY timeframe. Production scorer uses HOURLY (1h) bars — hourly MACD has NOT yet crossed (production score still 0.650 = RSI+ADX+BB only). CRITICAL RISK IDENTIFIED: daily RSI=60.96, daily BB%B=0.694 — the daily-timeframe bounce has already occurred significantly. If the hourly RSI recovers above 30 before the hourly MACD crosses, the on-cross estimate drops from 0.95 to 0.65 (below threshold). Session 7 watches for BOTH the hourly MACD cross AND whether RSI/BB conditions still hold. NEW ENTRANT: XRP jumped to 0.440 (was 0.300 in S5) — ADX gate newly cleared on hourly timeframe. SOL and UNI flipped short — 9/11 long-biased (was 11/11 in S5).",
+  "market_observations": {
+    "regime": "Post-capitulation partial recovery — 9/11 long-biased, SOL/UNI flipped short. Daily MACD cross confirmed for DOGE but hourly setup still pending. Capitulation breadth narrowing.",
+    "broad_bias": "9/11 long-biased (DOGE, ETH, BCH, XRP, BTC, AVAX, LINK, LTC, AAVE), 2/11 short-biased (SOL, UNI). Down from 11/11 in S5.",
+    "critical_developments": {
+      "DOGE_daily_macd_crossed": "DOGE daily MACD histogram crossed positive between S5 (hist=−0.000250) and S6 (prev daily=+0.001270, current daily=+0.000783). The reversal signal has fired on the DAILY timeframe. Production hourly score still 0.650 (hourly MACD negative) — cross is a timeframe lag, not a failure. ADX(diag daily)=67.98 — very strong trend continuing. CRITICAL RISK: daily RSI=60.96 and BB%B=+0.694 mean the daily-timeframe bounce is already well advanced. If hourly RSI recovers above 30 before the hourly MACD crosses, the production score drops. Session 7 is the watch for whether conditions still hold at hourly MACD cross time.",
+      "DOGE_setup_degradation_risk": "S5 entry thesis: RSI=16.40 (score 1.0) + ADX≥40 (score 1.0) + BB%B=−0.161 (score 1.0) + MACD_cross (score 1.0) = 0.95. S6 risk: daily RSI=60.96 and BB%B=+0.694 suggest significant price recovery already. If the hourly equivalents have recovered proportionally, the next-bar on-cross estimate could be 0.65 (below threshold) rather than 0.95. The idea window may be narrowing.",
+      "XRP_new_watchlist_entry": "XRP jumped from 0.300 (S5) to 0.440 (S6) — ADX gate newly cleared on hourly timeframe (was below 25 in S5, now 25–40). Score breakdown: RSI(0.5)×0.30 + ADX(0.7)×0.20 + BB(1.0)×0.15 = 0.15+0.14+0.15 = 0.44. Implies hourly RSI in 30–45 range, ADX 25–40, BB%B≤0.10. Diagnostic (daily): RSI=49.16, BB%B=0.305, MACD_hist=−0.001370 (daily deepening negative — same trajectory as DOGE in S3/S4). XRP may be following DOGE's oversold pattern 2–3 sessions behind. MACD cross could score ~0.59–0.65 on hourly.",
+      "SOL_UNI_direction_flip": "SOL flipped short (0.120, was 0.225 long in S5). UNI flipped short (0.120, was 0.300 long in S5). Both recovered from extreme oversold on hourly RSI (above 45 or direction now negative-dominant). This is consistent with the partial recovery theme — the weakest-trend names are rotating back to short while the strongest (DOGE, ETH, BCH, XRP) maintain the setup.",
+      "BCH_daily_macd_crossed": "BCH daily MACD_hist=+0.923 (prev=+1.335) — also crossed positive on daily. Production score still 0.450 (ADX gate closed in production). Score unchanged despite daily cross because ADX gate remains closed on hourly."
+    },
+    "key_levels": {
+      "DOGEUSDT": {
+        "price": "0.1075",
+        "rsi_hourly_implied": "<30 (production score implies RSI score 1.0)",
+        "rsi_daily_diagnostic": 60.96,
+        "adx_production_est": "≥40 (score math: 0.650 = RSI+ADX+BB)",
+        "adx_daily_diagnostic": 67.98,
+        "bb_pct_b_hourly_implied": "≤0.10 (production score implies BB score 1.0)",
+        "bb_pct_b_daily_diagnostic": 0.694,
+        "macd_hist_hourly": "negative (production score MACD misaligned)",
+        "macd_hist_daily": 0.000783,
+        "macd_hist_daily_prev": 0.001270,
+        "daily_macd_crossed": true,
+        "note": "PRIMARY WATCHLIST. Daily MACD crossed positive (hist: −0.000250 S5 → +0.001270 → +0.000783). Hourly MACD still negative (score 0). RISK: daily RSI=60.96, BB%B=+0.694 — daily bounce significantly advanced. If hourly RSI/BB conditions erode by the hourly cross, on-cross estimate drops. S7 is the final confirmation window."
+      },
+      "ETHUSDT": {
+        "price": "2287.90",
+        "rsi_daily_diagnostic": 50.35,
+        "adx_daily_diagnostic": 29.48,
+        "adx_production_est": "25–40 (score 0.7, unchanged from S5)",
+        "bb_pct_b_daily_diagnostic": 0.293,
+        "macd_hist_daily": -6.197961,
+        "macd_hist_daily_prev": -2.804442,
+        "note": "Score 0.590, unchanged from S5. Daily RSI recovered to 50.35 (was 19.72 in S5 diagnostic) but hourly RSI still <30 (production score implies score 1.0). Daily MACD deepening negative (−2.804 → −6.198). No hourly MACD cross imminent. ADX production est 25–40."
+      },
+      "BCHUSDT": {
+        "price": "451.11",
+        "rsi_daily_diagnostic": 50.61,
+        "adx_daily_diagnostic": 23.79,
+        "adx_production_est": "<25 (gate closed, score math: 0.450 = RSI+BB only)",
+        "bb_pct_b_daily_diagnostic": 0.519,
+        "macd_hist_daily": 0.922891,
+        "macd_hist_daily_prev": 1.335073,
+        "daily_macd_crossed": true,
+        "note": "Daily MACD crossed positive (both bars positive, declining). ADX gate still closed in production. Score 0.450 unchanged. Daily RSI=50.61 (recovered). ADX diag=23.79 (daily Wilder-adjusted — this is lower than S5 diag 46.18, suggesting the production ADX gap is even larger than thought, or the daily diag ADX is different methodology)."
+      },
+      "XRPUSDT": {
+        "price": "1.3888",
+        "rsi_daily_diagnostic": 49.16,
+        "adx_daily_diagnostic": 22.62,
+        "adx_production_est": "25–40 (newly cleared — score 0.440 = RSI(0.5)+ADX(0.7)+BB(1.0) = 0.44)",
+        "bb_pct_b_daily_diagnostic": 0.305,
+        "macd_hist_daily": -0.001370,
+        "macd_hist_daily_prev": -0.000398,
+        "note": "NEW WATCHLIST ENTRY. ADX gate newly cleared on hourly. Score jumped 0.300→0.440 (+0.140). Daily MACD deepening negative (−0.000398 → −0.001370) — same pre-cross pattern as DOGE S3/S4. BB%B near lower band on hourly. Secondary watchlist behind DOGE."
+      },
+      "BTCUSDT": {
+        "confluence": 0.300,
+        "direction": "long",
+        "note": "Unchanged from S5. No new data."
+      },
+      "AVAXUSDT": {
+        "confluence": 0.225,
+        "direction": "long",
+        "note": "Dropped from 0.300 (S5). ADX gate may have weakened or BB%B moved above 0.25."
+      },
+      "LINKUSDT": {
+        "confluence": 0.225,
+        "direction": "long",
+        "note": "Dropped from 0.300 (S5)."
+      },
+      "LTCUSDT": {
+        "confluence": 0.225,
+        "direction": "long",
+        "note": "Unchanged from S5."
+      },
+      "AAVEUSDT": {
+        "confluence": 0.225,
+        "direction": "long",
+        "note": "Dropped from 0.300 (S5)."
+      },
+      "SOLUSDT": {
+        "confluence": 0.120,
+        "direction": "short",
+        "note": "Direction flipped from long (0.225) to short (0.120). RSI recovered above 45 or MACD pushed direction negative on hourly."
+      },
+      "UNIUSDT": {
+        "confluence": 0.120,
+        "direction": "short",
+        "note": "Direction flipped from long (0.300) to short (0.120). Significant score drop."
+      }
+    },
+    "watchlist_for_next_session": [
+      "DOGEUSDT",
+      "ETHUSDT",
+      "BCHUSDT",
+      "XRPUSDT"
+    ],
+    "trigger_conditions": {
+      "DOGEUSDT": "Hourly MACD cross — still pending. Daily has crossed (confirmed S6). Key risk: will hourly RSI/BB conditions still hold at cross time? If hourly RSI recovers above 30 and BB%B above 0.25 before cross, on-cross estimate drops from 0.95 to 0.65. Session 7 is the decisive test.",
+      "XRPUSDT": "Hourly MACD cross while ADX gate holds. MACD_hist deepening negative on daily (−0.001370). Pattern mirrors DOGE S3/S4. On cross estimate: ~0.59–0.65 (RSI in 30–45 range limits RSI component to 0.5).",
+      "ETHUSDT": "Hourly MACD must turn positive (daily deepening to −6.198). Not imminent.",
+      "BCHUSDT": "ADX gate must clear in production on hourly. Not imminent."
+    },
+    "timeframe_divergence_note": "IMPORTANT: Diagnostic uses 60d DAILY bars. Production scorer uses 7d × 1h HOURLY bars. RSI-14 on daily = 14-day momentum; RSI-14 on hourly = 14-hour momentum. Values can diverge dramatically: DOGE daily RSI=60.96 while hourly RSI<30 (implied by production score). Diagnostic values are useful for MACD direction and ADX trend magnitude, NOT for inferring current hourly component scores."
+  },
+  "infrastructure_notes": {
+    "binance_geo_block": "HTTP 451 permanent on this IP.",
+    "bybit_geo_block": "HTTP 403 permanent on this IP.",
+    "funding_status": "Zeroed all sessions. Max achievable confluence without funding = 0.95. Threshold 0.70 still reachable.",
+    "tradingview_mcp": "Not available in Claude Code sessions — yfinance covers OHLCV adequately.",
+    "yfinance_rate_limit": "S5 fix confirmed working: running diagnostic AFTER main script (no concurrency). All 11 symbols loaded successfully in S6.",
+    "adx_implementation_gap": "Production uses ta.ADXIndicator (Wilder smoothing, alpha=1/14≈0.071). Diagnostic uses ewm(span=14) (alpha=2/15≈0.133). Diagnostic ADX ≈ 2× production on HOURLY diagnostic. NOTE: S6 diagnostic uses DAILY bars — DAILY ADX is computed differently from hourly; comparison methodology changed session to session. Use score math for production ADX bracket.",
+    "diagnostic_timeframe_note": "S6 diagnostic switched to DAILY bars (consistent with prior sessions' 60d daily download). Daily RSI/BB/MACD diverge dramatically from hourly production values. Diagnostic MACD is useful for direction confirmation; RSI/BB not authoritative for production scoring."
+  },
+  "new_strategy_proposals": {
+    "written_to": "docs/improvements/strategies/",
+    "files": [
+      "funding_rate_divergence.md",
+      "vwap_nyse_open_retest.md",
+      "ema_ribbon_compression_breakout.md",
+      "on_chain_whale_flow.md",
+      "broad_market_capitulation_reversal.md"
+    ],
+    "session6_note": "No new proposals. Daily MACD cross on DOGE and BCH confirms the broad_market_capitulation_reversal entry thesis — but the idea requires the HOURLY cross to score above 0.70. Key open question for backtest: does the daily MACD cross precede the hourly cross by a predictable interval? If so, the daily cross is a leading signal that could inform position sizing rules.",
+    "priority_order": [
+      "1. ema_ribbon_compression_breakout — DOGE daily MACD crossed. Hourly cross is the confirmation entry. Live test in progress.",
+      "2. broad_market_capitulation_reversal — Daily confirms the thesis. S6 DOGE daily cross = Condition 3 fired on daily timeframe. HOURLY is the production threshold.",
+      "3. funding_rate_divergence — blocked on this IP",
+      "4. vwap_nyse_open_retest — needs 5m bars",
+      "5. on_chain_whale_flow — needs data accumulation"
+    ]
+  },
+  "scan_results_ranked": [
     {
-      "symbol": "BTCUSDT",
-      "confluence": 0.225,
-      "direction": "long"
+      "symbol": "DOGEUSDT",
+      "confluence": 0.650,
+      "direction": "long",
+      "price": "0.1075",
+      "rsi_daily": 60.96,
+      "adx_daily_diagnostic": 67.98,
+      "adx_production_est": "≥40",
+      "bb_pct_b_daily": 0.694,
+      "macd_hist_daily": 0.000783,
+      "daily_macd_crossed": true,
+      "delta_s5_to_s6": "+0.000",
+      "note": "Daily MACD crossed. Hourly still negative. Setup degradation risk (daily RSI=60.96 suggests bounce advanced). S7 decisive."
     },
     {
       "symbol": "ETHUSDT",
-      "confluence": 0.45,
-      "direction": "long"
+      "confluence": 0.590,
+      "direction": "long",
+      "price": "2287.90",
+      "rsi_daily": 50.35,
+      "adx_daily_diagnostic": 29.48,
+      "adx_production_est": "25–40",
+      "bb_pct_b_daily": 0.293,
+      "macd_hist_daily": -6.197961,
+      "delta_s5_to_s6": "+0.000",
+      "note": "Unchanged. Daily RSI=50 (recovered); hourly still oversold. MACD deepening negative on daily."
     },
     {
-      "symbol": "SOLUSDT",
-      "confluence": 0.0,
-      "direction": "neutral"
+      "symbol": "BCHUSDT",
+      "confluence": 0.450,
+      "direction": "long",
+      "price": "451.11",
+      "rsi_daily": 50.61,
+      "adx_daily_diagnostic": 23.79,
+      "adx_production_est": "<25 (gate closed)",
+      "bb_pct_b_daily": 0.519,
+      "macd_hist_daily": 0.922891,
+      "daily_macd_crossed": true,
+      "delta_s5_to_s6": "+0.000",
+      "note": "Daily MACD crossed positive. Production ADX gate still closed — score capped at 0.45."
+    },
+    {
+      "symbol": "XRPUSDT",
+      "confluence": 0.440,
+      "direction": "long",
+      "price": "1.3888",
+      "rsi_daily": 49.16,
+      "adx_daily_diagnostic": 22.62,
+      "adx_production_est": "25–40 (newly cleared on hourly)",
+      "bb_pct_b_daily": 0.305,
+      "macd_hist_daily": -0.001370,
+      "delta_s5_to_s6": "+0.140",
+      "note": "NEW watchlist entry. ADX gate newly cleared. Daily MACD deepening negative — pre-cross pattern. Secondary watchlist."
+    },
+    {
+      "symbol": "BTCUSDT",
+      "confluence": 0.300,
+      "direction": "long",
+      "delta_s5_to_s6": "+0.000"
     },
     {
       "symbol": "AVAXUSDT",
+      "confluence": 0.225,
+      "direction": "long",
+      "delta_s5_to_s6": "-0.075"
+    },
+    {
+      "symbol": "LINKUSDT",
+      "confluence": 0.225,
+      "direction": "long",
+      "delta_s5_to_s6": "-0.075"
+    },
+    {
+      "symbol": "LTCUSDT",
+      "confluence": 0.225,
+      "direction": "long",
+      "delta_s5_to_s6": "+0.000"
+    },
+    {
+      "symbol": "AAVEUSDT",
+      "confluence": 0.225,
+      "direction": "long",
+      "delta_s5_to_s6": "-0.075"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "confluence": 0.120,
+      "direction": "short",
+      "delta_s5_to_s6": "-0.105",
+      "note": "Direction flipped from long to short. RSI recovered on hourly."
+    },
+    {
+      "symbol": "UNIUSDT",
+      "confluence": 0.120,
+      "direction": "short",
+      "delta_s5_to_s6": "-0.180",
+      "note": "Direction flipped from long to short."
+    }
+  ],
+  "session_history_summary": [
+    {
+      "session": 1,
+      "timestamp": "2026-05-07T02:51:17Z",
+      "leader": "DOGEUSDT",
+      "leader_score": 0.590,
+      "ideas_fired": 0,
+      "regime": "correction/consolidation"
+    },
+    {
+      "session": 2,
+      "timestamp": "2026-05-07T03:56:44Z",
+      "leader": "DOGEUSDT",
+      "leader_score": 0.515,
+      "ideas_fired": 0,
+      "regime": "downtrend/capitulation"
+    },
+    {
+      "session": 3,
+      "timestamp": "2026-05-07T05:22:08Z",
+      "leader": "DOGEUSDT",
+      "leader_score": 0.425,
+      "ideas_fired": 0,
+      "regime": "relief bounce within downtrend — DOGE MACD at −0.000004 (near-cross, missed)"
+    },
+    {
+      "session": 4,
+      "timestamp": "2026-05-07T14:13:34Z",
+      "leader": "DOGEUSDT",
+      "leader_score": 0.440,
+      "ideas_fired": 0,
+      "regime": "post-bounce stabilization — DOGE retraced to lower BB, MACD cross imminent"
+    },
+    {
+      "session": 5,
+      "timestamp": "2026-05-07T15:25:03Z",
+      "leader": "DOGEUSDT",
+      "leader_score": 0.650,
+      "ideas_fired": 0,
+      "regime": "market-wide capitulation — 11/11 long-biased, RSI<20 for DOGE/ETH/BCH, DOGE one candle from 0.95"
+    },
+    {
+      "session": 6,
+      "timestamp": "2026-05-07T16:54:09Z",
+      "leader": "DOGEUSDT",
+      "leader_score": 0.650,
+      "ideas_fired": 0,
+      "regime": "post-capitulation partial recovery — 9/11 long-biased, DOGE daily MACD crossed positive, XRP joins watchlist at 0.440"
+    }
+  ],
+  "scan_results_summary": [
+    {
+      "symbol": "BTCUSDT",
       "confluence": 0.3,
       "direction": "long"
     },
     {
+      "symbol": "ETHUSDT",
+      "confluence": 0.59,
+      "direction": "long"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "confluence": 0.12,
+      "direction": "short"
+    },
+    {
+      "symbol": "AVAXUSDT",
+      "confluence": 0.225,
+      "direction": "long"
+    },
+    {
       "symbol": "LINKUSDT",
-      "confluence": 0.0,
-      "direction": "neutral"
+      "confluence": 0.225,
+      "direction": "long"
     },
     {
       "symbol": "LTCUSDT",
@@ -36,17 +323,17 @@
     },
     {
       "symbol": "BCHUSDT",
-      "confluence": 0.0,
-      "direction": "neutral"
+      "confluence": 0.45,
+      "direction": "long"
     },
     {
       "symbol": "XRPUSDT",
-      "confluence": 0.225,
+      "confluence": 0.44,
       "direction": "long"
     },
     {
       "symbol": "DOGEUSDT",
-      "confluence": 0.59,
+      "confluence": 0.65,
       "direction": "long"
     },
     {
@@ -56,8 +343,8 @@
     },
     {
       "symbol": "UNIUSDT",
-      "confluence": 0.0,
-      "direction": "neutral"
+      "confluence": 0.12,
+      "direction": "short"
     }
   ]
 }

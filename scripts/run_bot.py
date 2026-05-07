@@ -144,11 +144,44 @@ def _build_outcome_capture(memory_store: Any, embedding_provider: Any) -> Any:
         return None
 
 
+def _build_analyst() -> Any:
+    """Construct the multi-step pre-trade analyst.
+
+    The analyst combines TradingView multi-timeframe ratings (1D/4H/1H)
+    with optional LLM synthesis. The TV path is the substantive signal —
+    it independently catches "long into a STRONG_SELL trend" cases the
+    rule-based strategies miss. The LLM is used only for the final
+    synthesis step and degrades gracefully when all providers are dead.
+
+    Returns ``None`` if the ``tradingview-ta`` dependency is unavailable
+    or another import fails. The pipeline accepts ``analyst=None`` and
+    proceeds without the analyst step in that case (rule-only evaluation
+    plus reasoner, same as before this layer existed).
+    """
+    try:
+        from src.agents.analyst import Analyst
+    except Exception as e:  # noqa: BLE001 — degrade gracefully
+        log.warning("Analyst not constructed (%s); pipeline will skip analyst step", e)
+        return None
+    # Reuse the same LLM router the autonomous reasoner uses so we share
+    # cooldowns + budget. If the router import fails we still get a
+    # functional analyst on the deterministic rule-based path.
+    llm_router: Any = None
+    try:
+        from src.llm.router import default_router
+
+        llm_router = default_router()
+    except Exception as e:  # noqa: BLE001 — analyst still works without LLM
+        log.warning("Analyst LLM router unavailable (%s); using rule-based path", e)
+    return Analyst(llm_router=llm_router)
+
+
 def _build_pipeline(
     broker: Any,
     journal_writer: JournalWriter,
     reasoner: Any,
     outcome_capture: Any,
+    analyst: Any,
 ) -> Any:
     """Construct TradePipeline + BrokerSnapshotProvider; None on broker outage."""
     if broker is None:
@@ -169,6 +202,7 @@ def _build_pipeline(
             snapshot_provider=snapshot_provider,
             reasoner=reasoner,
             outcome_capture=outcome_capture,
+            analyst=analyst,
         )
     except Exception as e:
         log.warning("TradePipeline not constructed (%s); falling back to stub evals", e)
@@ -239,7 +273,10 @@ def build_runner() -> tuple[Runner, JournalWriter, dict[str, Any]]:
     broker = _build_paper_broker()
     reasoner, memory_store, embedding_provider = _build_reasoner(journal_writer)
     outcome_capture = _build_outcome_capture(memory_store, embedding_provider)
-    pipeline = _build_pipeline(broker, journal_writer, reasoner, outcome_capture)
+    analyst = _build_analyst()
+    pipeline = _build_pipeline(
+        broker, journal_writer, reasoner, outcome_capture, analyst
+    )
     bars_cache = _build_bars_cache()
 
     agents = _load_agents()
