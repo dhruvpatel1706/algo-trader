@@ -57,6 +57,28 @@ function fmtAge(iso: string | null | undefined, nowMs: number): string {
 }
 
 /**
+ * MAX_SINGLE_POSITION cap from src/config.py — used here only to color the
+ * concentration column. The risk module is the source of truth for actual
+ * enforcement; this is purely informational so the user can see breach
+ * state at a glance without reading a Watcher INCIDENT file.
+ */
+const MAX_SINGLE_POSITION_PCT = 10;
+
+function concentrationTone(pctOfEquity: number | null): {
+  cls: string;
+  label: string;
+} {
+  if (pctOfEquity === null) return { cls: "text-muted", label: "" };
+  if (pctOfEquity >= MAX_SINGLE_POSITION_PCT * 1.5)
+    return { cls: "text-danger font-semibold", label: "BREACH" };
+  if (pctOfEquity >= MAX_SINGLE_POSITION_PCT)
+    return { cls: "text-warn font-semibold", label: "AT CAP" };
+  if (pctOfEquity >= MAX_SINGLE_POSITION_PCT * 0.75)
+    return { cls: "text-warn", label: "near cap" };
+  return { cls: "text-muted", label: "" };
+}
+
+/**
  * Live positions: prefers /api/positions/live (per-agent attribution); falls
  * back to /api/positions for the v1 broker-snapshot view.
  */
@@ -73,6 +95,18 @@ export function LivePositionsTable() {
     refetchInterval: 5_000,
     enabled: !live.data || live.data.length === 0,
   });
+  // Pull portfolio so we can compute % of equity per position. If it's
+  // unavailable we just show "—" in the concentration column — the column
+  // is informational, never blocking.
+  const portfolio = useQuery({
+    queryKey: ["portfolio"],
+    queryFn: api.portfolio,
+    refetchInterval: 5_000,
+  });
+  const equity =
+    portfolio.data && Number.isFinite(portfolio.data.equity)
+      ? portfolio.data.equity
+      : null;
 
   // Tick a "now" stamp each second so the "X s ago" mark age updates without
   // waiting for a full refetch — the user can SEE the data is fresh even if
@@ -103,6 +137,12 @@ export function LivePositionsTable() {
               <th className="px-4 py-2">live mark</th>
               <th className="px-4 py-2">mark age</th>
               <th className="px-4 py-2">mkt value</th>
+              <th
+                className="px-4 py-2"
+                title="Position notional as % of total equity. Cap is MAX_SINGLE_POSITION (10%); cumulative-cap fix in commit bedc7bd refuses fresh adds beyond this."
+              >
+                % equity
+              </th>
               <th className="px-4 py-2">unrealized P&L</th>
               <th className="px-4 py-2">side</th>
             </tr>
@@ -110,7 +150,7 @@ export function LivePositionsTable() {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-muted">
+                <td colSpan={11} className="px-4 py-6 text-center text-muted">
                   no open positions
                 </td>
               </tr>
@@ -122,6 +162,17 @@ export function LivePositionsTable() {
               // that hasn't reported P&L yet.
               const upl = isNum(p.unrealized_pl) ? p.unrealized_pl : 0;
               const uplPct = isNum(p.unrealized_plpc) ? p.unrealized_plpc * 100 : null;
+              // Compute notional from market_value, falling back to qty*mark.
+              const notional = isNum(p.market_value)
+                ? p.market_value
+                : isNum(p.qty) && isNum(p.current_price)
+                  ? p.qty * p.current_price
+                  : null;
+              const pctOfEquity =
+                notional !== null && equity && equity > 0
+                  ? (notional / equity) * 100
+                  : null;
+              const tone = concentrationTone(pctOfEquity);
               return (
                 <tr key={`${p.symbol}-${lp.agent ?? ""}`} className="border-t border-border font-mono">
                   <td className="px-4 py-2 font-semibold">{p.symbol}</td>
@@ -137,6 +188,14 @@ export function LivePositionsTable() {
                     {fmtAge(lp.mark_as_of, nowMs)}
                   </td>
                   <td className="px-4 py-2">${fmt(p.market_value)}</td>
+                  <td className={`px-4 py-2 ${tone.cls}`}>
+                    {pctOfEquity === null ? "—" : `${fmt(pctOfEquity, 1)}%`}
+                    {tone.label && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider">
+                        {tone.label}
+                      </span>
+                    )}
+                  </td>
                   <td
                     className={`px-4 py-2 ${upl > 0 ? "text-accent" : upl < 0 ? "text-danger" : "text-muted"}`}
                   >
