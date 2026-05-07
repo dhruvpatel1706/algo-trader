@@ -277,8 +277,8 @@ class Runner:
             )
 
         # 24/7 crypto, 5-min cadence. Tuned for paper-tier "constant
-        # signal flow" rather than live cost-control: every 5 min × 11
-        # crypto pairs × 2 strategies → up to 132 signal evaluations / hr,
+        # signal flow" rather than live cost-control: every 5 min x 11
+        # crypto pairs x 4 strategies -> up to 264 signal evaluations / hr,
         # any of which can fire a trade if rules align. The data-refresh
         # job runs every 2 min so bars are fresh when eval fires.
         crypto = agents.get("crypto")

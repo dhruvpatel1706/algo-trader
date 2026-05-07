@@ -54,6 +54,7 @@ from dashboard.api.feeds_status import router as feeds_status_router
 from dashboard.api.journal_reader import read_trades
 from dashboard.api.kill import execute_kill, list_incidents
 from dashboard.api.multi_agent import router as multi_agent_router
+from dashboard.api.orchestrator import router as orchestrator_router
 from dashboard.api.refusal_endpoints import router as refusal_router
 from dashboard.api.runner_control import (
     RunnerSupervisor,
@@ -61,7 +62,6 @@ from dashboard.api.runner_control import (
     status_to_dict,
 )
 from dashboard.api.state import DashboardState, get_state
-from dashboard.api.orchestrator import router as orchestrator_router
 from dashboard.api.trade_export import router as trade_export_router
 
 log = logging.getLogger(__name__)
