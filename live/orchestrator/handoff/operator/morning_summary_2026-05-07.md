@@ -2,6 +2,15 @@
 
 **TL;DR:** Bot is up, healthy, running 4 long-only crypto strategies (was 2). All overnight fixes are live and verified in production: cumulative cap, LLM cooldown, EMA Ribbon Compression, Funding Rate Divergence. 2 of 4 researcher proposals are now shipped. 5 over-cap crypto positions from before the cap fix are still open and will only resolve when their exits fire — expected, not a bug. New dashboard panel surfaces what the parallel researcher session is recommending.
 
+## Morning event log (since you slept)
+
+- **~10:06 ET** — brief network/DNS outage. The bot couldn't resolve `paper-api.alpaca.markets` for ~2 minutes. Five buy orders were attempted and all rejected by the broker (DNS fail, not by us). No fills, no harm.
+- **10:11 ET** — first eval after network recovery. Cumulative-cap correctly refused 4/5 signals (ETH, AVAX, LTC, BCH). **One slipped through:** a tiny 150-DOGE buy ($16.55 worth). Investigated it — found a real bug in the cap math (see below). Patched, restarted the bot at 10:18 ET. Bot is now running on the fixed code as PID 622.
+- **Cumulative-cap leak** — Live failure: DOGE position crept from 90,487 to 90,878 units across a few cycles. Root cause: the cap check used `market_value` (qty × current_price). When price dipped on the over-cap position, `market_value` dropped, the cap math thought there was room for a small add, the bot filled it, then price recovered and the position ratcheted up. **Fixed in commit `3cd1167` — now uses MAX(mark, book) so price dips can't manufacture cap budget.** Regression test pinned.
+- **Researcher session 3** detected a regime shift to "relief bounce within downtrend" — top confluence dropped from 0.59 (session 1) to 0.42 (session 3). Setups are weakening; strategies correctly NOT firing new positions.
+
+**Equity status now:** $99,577, day -0.32%. Net flat-to-slightly-down for the day after a peak of +0.54% earlier overnight. Crypto market choppy.
+
 ---
 
 ## What landed tonight (15 commits)
