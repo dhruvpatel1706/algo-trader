@@ -76,6 +76,11 @@ def test_portfolio_history_returns_alpaca_data_when_journal_empty(
     monkeypatch.setattr(
         broker_proxy_module.BrokerProxy, "get_portfolio_history", fake_get
     )
+    # Suppress the live "now" stitch so this test asserts the raw Alpaca
+    # history shape — covered separately in test_..._appends_live_now_point.
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_account", lambda self: None
+    )
 
     r = client.get("/api/portfolio/equity")
     assert r.status_code == 200
@@ -85,6 +90,68 @@ def test_portfolio_history_returns_alpaca_data_when_journal_empty(
     assert body["points"][-1]["equity"] == 100100.0
     assert body["start_equity"] == 100000.0
     assert body["end_equity"] == 100100.0
+
+
+def test_portfolio_history_appends_live_now_point_when_history_is_stale(
+    client: TestClient, monkeypatch
+) -> None:
+    """Single-day Alpaca snapshot (e.g. brand-new funded account) → endpoint
+    appends a fresh ``now`` point from broker.get_account so the chart has
+    >=2 points to draw a line."""
+    from dashboard.api import broker_proxy as broker_proxy_module
+
+    def fake_get(self: Any, *, days: int = 90) -> list[dict]:
+        return [{"ts": "2026-05-06T00:00:00+00:00", "equity": 100000.0}]
+
+    def fake_account(self: Any) -> dict:
+        return {"equity": 99896.31}
+
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_portfolio_history", fake_get
+    )
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_account", fake_account
+    )
+
+    r = client.get("/api/portfolio/equity")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["points"]) == 2
+    assert body["points"][0]["equity"] == 100000.0
+    assert body["points"][1]["equity"] == 99896.31
+    assert body["end_equity"] == 99896.31
+
+
+def test_portfolio_history_skips_live_point_when_already_covers_today(
+    client: TestClient, monkeypatch
+) -> None:
+    """Today's Alpaca row already matches live equity → don't append a
+    duplicate ``now`` point that would visually flatline."""
+    from dashboard.api import broker_proxy as broker_proxy_module
+
+    today = datetime.now(UTC).date().isoformat()
+
+    def fake_get(self: Any, *, days: int = 90) -> list[dict]:
+        return [
+            {"ts": "2026-05-06T00:00:00+00:00", "equity": 100000.0},
+            {"ts": f"{today}T00:00:00+00:00", "equity": 99896.31},
+        ]
+
+    def fake_account(self: Any) -> dict:
+        return {"equity": 99896.31}  # same as today's row
+
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_portfolio_history", fake_get
+    )
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_account", fake_account
+    )
+
+    r = client.get("/api/portfolio/equity")
+    assert r.status_code == 200
+    body = r.json()
+    # Two history rows, no duplicate "now" point appended.
+    assert len(body["points"]) == 2
 
 
 def test_portfolio_history_uses_journal_when_journal_has_fills(
@@ -158,6 +225,72 @@ def test_portfolio_history_falls_back_to_empty_when_both_sources_fail(
 
     def fake_get(self: Any, *, days: int = 90) -> list[dict] | None:
         return None
+
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_portfolio_history", fake_get
+    )
+
+    r = client.get("/api/portfolio/equity")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["points"] == []
+    assert body["start_equity"] is None
+    assert body["end_equity"] is None
+
+
+def test_portfolio_history_strips_leading_zero_days_from_alpaca(
+    client: TestClient, monkeypatch
+) -> None:
+    """Alpaca returns one row/business-day for the whole window, including
+    pre-funding days that come back with ``equity == 0``. The endpoint must
+    drop the leading zero block so the chart's y-axis fits the funded
+    portion of the curve. Internal zeros (e.g. a real $0 day after a wipe)
+    must NOT be stripped — only the leading run.
+    """
+    from dashboard.api import broker_proxy as broker_proxy_module
+
+    raw = [
+        {"ts": "2026-02-07T00:00:00+00:00", "equity": 0.0},
+        {"ts": "2026-02-08T00:00:00+00:00", "equity": 0.0},
+        {"ts": "2026-02-09T00:00:00+00:00", "equity": 0.0},
+        {"ts": "2026-05-05T00:00:00+00:00", "equity": 100000.0},
+        {"ts": "2026-05-06T00:00:00+00:00", "equity": 0.0},  # internal zero - kept
+        {"ts": "2026-05-07T00:00:00+00:00", "equity": 99896.31},
+    ]
+
+    def fake_get(self: Any, *, days: int = 90) -> list[dict]:
+        return list(raw)
+
+    monkeypatch.setattr(
+        broker_proxy_module.BrokerProxy, "get_portfolio_history", fake_get
+    )
+
+    r = client.get("/api/portfolio/equity")
+    assert r.status_code == 200
+    body = r.json()
+    # 3 leading zeros stripped; first funded day onward retained.
+    assert len(body["points"]) == 3
+    assert body["points"][0]["equity"] == 100000.0
+    assert body["points"][1]["equity"] == 0.0  # internal zero preserved
+    assert body["points"][2]["equity"] == 99896.31
+    assert body["start_equity"] == 100000.0
+    assert body["end_equity"] == 99896.31
+
+
+def test_portfolio_history_handles_all_zero_alpaca_response(
+    client: TestClient, monkeypatch
+) -> None:
+    """Brand-new account where every Alpaca day reads as $0 → no points
+    survive the strip; endpoint returns an empty curve cleanly (no crash,
+    no negative-index access)."""
+    from dashboard.api import broker_proxy as broker_proxy_module
+
+    def fake_get(self: Any, *, days: int = 90) -> list[dict]:
+        return [
+            {"ts": "2026-04-01T00:00:00+00:00", "equity": 0.0},
+            {"ts": "2026-04-02T00:00:00+00:00", "equity": 0.0},
+            {"ts": "2026-04-03T00:00:00+00:00", "equity": 0.0},
+        ]
 
     monkeypatch.setattr(
         broker_proxy_module.BrokerProxy, "get_portfolio_history", fake_get

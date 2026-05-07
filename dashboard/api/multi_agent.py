@@ -434,19 +434,15 @@ async def portfolio_equity(
     # server-side daily equity snapshots so the chart shows a real line
     # instead of an empty state. Alpaca doesn't know about our agent
     # partitioning, so per-agent views never use this fallback.
+    #
+    # Alpaca returns one row per business day in the requested window, and
+    # rows from before the account was funded come back as ``equity == 0``.
+    # If we forward those raw zeros to the chart the curve hugs the x-axis
+    # for ~60 days and the meaningful portion (single $100K point) becomes
+    # invisible against the y-scale. Strip the leading zero block but keep
+    # any internal zero days (those are real ``$0`` snapshots, not stubs).
     if not points and agent is None:
-        try:
-            from dashboard.api.broker_proxy import get_broker_proxy
-            broker = get_broker_proxy()
-            history = broker.get_portfolio_history(days=days)
-        except Exception as exc:  # defensive: never crash the dashboard
-            log.debug("alpaca portfolio_history fallback failed: %s", exc)
-            history = None
-        if history:
-            points = [
-                EquityPoint(ts=h["ts"], equity=float(h["equity"]))
-                for h in history
-            ]
+        points = _alpaca_fallback_curve(days)
 
     return PortfolioEquityResponse(
         agent=agent,
@@ -455,6 +451,64 @@ async def portfolio_equity(
         start_equity=points[0].equity if points else None,
         end_equity=points[-1].equity if points else None,
     )
+
+
+def _alpaca_fallback_curve(days: int) -> list[EquityPoint]:
+    """Build the joined-view equity curve from Alpaca when the journal is empty.
+
+    Two transformations on top of the raw Alpaca history:
+      1. Strip the leading run of ``equity == 0`` rows that Alpaca returns
+         for days before the account was funded — without this, the curve
+         hugs the x-axis for ~60 days and the funded portion becomes
+         invisible against the y-scale.
+      2. Append a fresh ``now`` point from ``broker.get_account()`` so a
+         freshly funded account (one daily Alpaca snapshot so far) still
+         produces a 2-point line instead of a single dot that
+         lightweight-charts cannot draw.
+    """
+    try:
+        from dashboard.api.broker_proxy import get_broker_proxy
+        broker = get_broker_proxy()
+        history = broker.get_portfolio_history(days=days)
+    except Exception as exc:  # defensive: never crash the dashboard
+        log.debug("alpaca portfolio_history fallback failed: %s", exc)
+        return []
+
+    points: list[EquityPoint] = []
+    if history:
+        first_funded = next(
+            (i for i, h in enumerate(history) if float(h["equity"]) > 0),
+            None,
+        )
+        # Every Alpaca row is $0: render an empty curve rather than a flat
+        # zero line. Internal zero days (after the first funded row) are
+        # preserved — those are real snapshots, not stubs.
+        usable = history[first_funded:] if first_funded is not None else []
+        points = [
+            EquityPoint(ts=h["ts"], equity=float(h["equity"])) for h in usable
+        ]
+
+    # Live "now" stitch: skip when today's row already matches the live
+    # mark within $0.01.
+    if points:
+        try:
+            snap = broker.get_account()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("broker.get_account live point failed: %s", exc)
+            snap = None
+        if isinstance(snap, dict):
+            try:
+                live_eq = float(snap.get("equity") or 0)
+            except (TypeError, ValueError):
+                live_eq = 0.0
+            if live_eq > 0:
+                now_iso = datetime.now(UTC).isoformat()
+                last = points[-1]
+                stale_day = last.ts[:10] < now_iso[:10]
+                drifted = abs(live_eq - last.equity) > 0.01
+                if stale_day or drifted:
+                    points.append(EquityPoint(ts=now_iso, equity=live_eq))
+    return points
 
 
 def _is_crypto_symbol(symbol: str) -> bool:
