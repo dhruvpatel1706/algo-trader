@@ -141,7 +141,9 @@ def test_fetch_funding_rate_network_failure_returns_empty(monkeypatch):
         raise OSError("simulated network failure")
 
     monkeypatch.setattr(funding.urllib.request, "urlopen", _boom)
-    with pytest.warns(UserWarning, match="funding rate fetch failed"):
+    # Both Binance and Bybit will fail with the same OSError — auto path
+    # warns once per source. Match either warning.
+    with pytest.warns(UserWarning, match="(binance|bybit) funding fetch failed"):
         df = fetch_funding_rate("BTCUSDT", date(2024, 1, 1), date(2024, 1, 2))
     assert df.empty
     assert list(df.columns) == ["funding_rate", "predicted_rate"]
@@ -172,3 +174,230 @@ def test_fetch_funding_rate_empty_payload_returns_empty(monkeypatch):
     )
     df = fetch_funding_rate("BTCUSDT", date(2024, 1, 1), date(2024, 1, 2))
     assert df.empty
+
+
+# ---------------------------------------------------------------------------
+# Bybit fallback (added to unblock Researcher session: Binance HTTP 451
+# geo-blocked on this IP, Bybit not).
+# ---------------------------------------------------------------------------
+
+
+def _bybit_payload(rates_with_ts: list[tuple[int, str]]) -> dict:
+    """Build a Bybit v5 funding-history response."""
+    return {
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "category": "linear",
+            "list": [
+                {
+                    "symbol": "BTCUSDT",
+                    "fundingRate": rate,
+                    "fundingRateTimestamp": str(ts),
+                }
+                for ts, rate in rates_with_ts
+            ],
+        },
+    }
+
+
+def test_fetch_funding_rate_bybit_source_parses_payload(monkeypatch):
+    payload = _bybit_payload(
+        [
+            (1_704_067_200_000, "0.0001"),
+            (1_704_096_000_000, "-0.00005"),
+        ]
+    )
+    monkeypatch.setattr(
+        funding.urllib.request, "urlopen", _fake_urlopen_factory(payload)
+    )
+    df = fetch_funding_rate(
+        "BTCUSDT", date(2024, 1, 1), date(2024, 1, 2), source="bybit"
+    )
+    assert not df.empty
+    assert list(df.columns) == ["funding_rate", "predicted_rate"]
+    assert len(df) == 2
+    assert df["funding_rate"].iloc[0] == pytest.approx(0.0001)
+
+
+def test_fetch_funding_rate_bybit_non_zero_retcode_returns_empty(monkeypatch):
+    payload = {"retCode": 10001, "retMsg": "Invalid symbol", "result": {"list": []}}
+    monkeypatch.setattr(
+        funding.urllib.request, "urlopen", _fake_urlopen_factory(payload)
+    )
+    with pytest.warns(UserWarning, match="bybit funding non-zero retCode"):
+        df = fetch_funding_rate(
+            "FAKEUSDT", date(2024, 1, 1), date(2024, 1, 2), source="bybit"
+        )
+    assert df.empty
+
+
+def _venue_for(target) -> str:
+    """Identify the venue from either a URL string OR a urllib.request.Request.
+
+    Tests monkey-patch ``urllib.request.urlopen`` and now receive a Request
+    object (we set a User-Agent header to satisfy OKX's WAF). This helper
+    keeps the tests readable.
+    """
+    url = target.full_url if hasattr(target, "full_url") else str(target)
+    if "binance" in url:
+        return "binance"
+    if "bybit" in url:
+        return "bybit"
+    if "okx" in url:
+        return "okx"
+    return "unknown"
+
+
+def test_fetch_funding_rate_auto_falls_back_when_binance_451(monkeypatch):
+    """Binance 451 (geo-block) → Bybit hit silently, no warning. Common
+    path on US-residential IPs, which is what motivated this fallback."""
+    import urllib.error
+    bybit_payload = _bybit_payload([(1_704_067_200_000, "0.00012")])
+
+    call_log: list[str] = []
+
+    def _switching_urlopen(target, timeout=None):
+        venue = _venue_for(target)
+        call_log.append(venue)
+        if venue == "binance":
+            raise urllib.error.HTTPError(
+                target.full_url, 451, "blocked", {}, None
+            )
+        body = json.dumps(bybit_payload).encode("utf-8")
+
+        class _Resp:
+            def read(self):
+                return body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+    monkeypatch.setattr(funding.urllib.request, "urlopen", _switching_urlopen)
+    df = fetch_funding_rate("BTCUSDT", date(2024, 1, 1), date(2024, 1, 2))
+    # Binance 451 → Bybit returns data → OKX never queried.
+    assert call_log[:2] == ["binance", "bybit"]
+    assert "okx" not in call_log
+    assert not df.empty
+    assert df["funding_rate"].iloc[0] == pytest.approx(0.00012)
+
+
+def test_fetch_funding_rate_auto_falls_back_when_binance_returns_empty_payload(
+    monkeypatch,
+):
+    """Binance returns 200-OK with [] → auto path STILL falls back to Bybit
+    so the caller never sees a misleading empty when data exists upstream."""
+    bybit_payload = _bybit_payload([(1_704_067_200_000, "0.0002")])
+    call_log: list[str] = []
+
+    def _switching_urlopen(target, timeout=None):
+        venue = _venue_for(target)
+        call_log.append(venue)
+        body = (
+            json.dumps([]).encode("utf-8")
+            if venue == "binance"
+            else json.dumps(bybit_payload).encode("utf-8")
+        )
+
+        class _Resp:
+            def read(self):
+                return body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+    monkeypatch.setattr(funding.urllib.request, "urlopen", _switching_urlopen)
+    df = fetch_funding_rate("BTCUSDT", date(2024, 1, 1), date(2024, 1, 2))
+    assert call_log[:2] == ["binance", "bybit"]
+    assert not df.empty
+    assert df["funding_rate"].iloc[0] == pytest.approx(0.0002)
+
+
+def test_fetch_funding_rate_auto_falls_through_to_okx(monkeypatch):
+    """Binance + Bybit both fail → auto path tries OKX. This is the
+    actual production path on US-residential IPs (what the dev machine
+    hit live: Binance 451, Bybit 403, OKX 200)."""
+    okx_payload = {
+        "code": "0",
+        "msg": "",
+        "data": [
+            {"fundingTime": "1704067200000", "fundingRate": "0.00009"},
+            {"fundingTime": "1704096000000", "fundingRate": "0.00011"},
+        ],
+    }
+    call_log: list[str] = []
+
+    def _switching_urlopen(target, timeout=None):
+        venue = _venue_for(target)
+        call_log.append(venue)
+        if venue == "okx":
+            body = json.dumps(okx_payload).encode("utf-8")
+
+            class _Resp:
+                def read(self):
+                    return body
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+            return _Resp()
+        raise OSError(f"{venue} simulated geo-block")
+
+    monkeypatch.setattr(funding.urllib.request, "urlopen", _switching_urlopen)
+    df = fetch_funding_rate("BTCUSDT", date(2024, 1, 1), date(2024, 1, 2))
+    assert call_log == ["binance", "bybit", "okx"]
+    assert not df.empty
+    assert df["funding_rate"].iloc[0] == pytest.approx(0.00009)
+
+
+def test_fetch_funding_rate_source_binance_does_not_fall_back(monkeypatch):
+    """Forcing source='binance' must NOT silently fall back to Bybit/OKX —
+    useful when a caller wants to verify a single-venue path explicitly."""
+    call_log: list[str] = []
+
+    def _binance_only_open(target, timeout=None):
+        call_log.append(_venue_for(target))
+        body = json.dumps([]).encode("utf-8")
+
+        class _Resp:
+            def read(self):
+                return body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp()
+
+    monkeypatch.setattr(funding.urllib.request, "urlopen", _binance_only_open)
+    df = fetch_funding_rate(
+        "BTCUSDT", date(2024, 1, 1), date(2024, 1, 2), source="binance"
+    )
+    assert call_log == ["binance"]
+    assert df.empty
+
+
+def test_fetch_funding_rate_okx_inst_id_mapping():
+    """The OKX inst-id mapping handles all three quote currencies."""
+    from src.data.funding import _to_okx_inst_id
+
+    assert _to_okx_inst_id("BTCUSDT") == "BTC-USDT-SWAP"
+    assert _to_okx_inst_id("ETHUSDC") == "ETH-USDC-SWAP"
+    assert _to_okx_inst_id("BTCUSD") == "BTC-USD-SWAP"
+    # Unknown / un-mappable: returns None so the caller can warn cleanly.
+    assert _to_okx_inst_id("AAPL") is None
