@@ -57,8 +57,24 @@ bonds:
   - LQD     # Investment-grade corporate bond
 
 crypto_majors:
+  # Eleven actively-quoted USD pairs verified live on Alpaca's crypto data API
+  # (paper tier). Listed by descending liquidity. Symbols use the Binance-style
+  # USDT suffix as our internal canonical form; the loader normalises to
+  # Alpaca's `XYZ/USD` shape via _normalize_crypto_symbol_alpaca().
+  #
+  # Excluded on purpose: MATIC, SHIB, MKR — Alpaca's quote endpoint returns
+  # $0.00 mids for these on the paper tier, which would corrupt sizing math.
   - BTCUSDT
   - ETHUSDT
+  - SOLUSDT
+  - AVAXUSDT
+  - LINKUSDT
+  - LTCUSDT
+  - BCHUSDT
+  - XRPUSDT
+  - DOGEUSDT
+  - AAVEUSDT
+  - UNIUSDT
 
 # Symbols flagged as broad-market index ETFs. Used by survivorship-bias check
 # in src/backtest/cli.py and the universe.is_index_etf() helper.

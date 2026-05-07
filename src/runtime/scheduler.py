@@ -172,10 +172,10 @@ class Runner:
         - ``equity_agent.eval``     - every 5 min, gated to NYSE hours
         - ``gold_agent.eval``       - every 5 min, gated to NYSE hours
         - ``bonds_agent.eval``      - every 5 min, gated to NYSE hours
-        - ``crypto_agent.eval``     - every 15 min, 24/7
+        - ``crypto_agent.eval``     - every 5 min, 24/7
         - ``governance_agent.eval`` - hourly
         - ``data_refresh``          - every 60s during equity hours
-        - ``crypto_data_refresh``   - every 5 min, 24/7 (only with bars_cache)
+        - ``crypto_data_refresh``   - every 2 min, 24/7 (only with bars_cache)
         - ``position_reconcile``    - every 30s
         - ``eod_summary``           - 16:05 ET daily
         - ``nightly_backtest``      - 23:00 ET daily
@@ -276,13 +276,17 @@ class Runner:
                 IntervalTrigger(minutes=5),
             )
 
-        # 24/7 crypto, 15-min cadence.
+        # 24/7 crypto, 5-min cadence. Tuned for paper-tier "constant
+        # signal flow" rather than live cost-control: every 5 min × 11
+        # crypto pairs × 2 strategies → up to 132 signal evaluations / hr,
+        # any of which can fire a trade if rules align. The data-refresh
+        # job runs every 2 min so bars are fresh when eval fires.
         crypto = agents.get("crypto")
         if crypto is not None:
             self.register(
                 "crypto_agent.eval",
                 _make_eval(crypto),
-                IntervalTrigger(minutes=15),
+                IntervalTrigger(minutes=5),
             )
 
         # Governance agent never trades; runs hourly via legacy stub path.
@@ -343,7 +347,7 @@ class Runner:
                 self.register(
                     "crypto_data_refresh",
                     _crypto_refresh,
-                    IntervalTrigger(minutes=5),
+                    IntervalTrigger(minutes=2),
                 )
         else:
             self.register(
