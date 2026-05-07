@@ -176,3 +176,9 @@ Alpaca's web UI.
 **LLM provider top-up.** Gemini's free tier alone is enough to keep the reasoner alive at
 our paper-tier eval rate. While they're all dead the reasoner falls open and strategies
 trade WITHOUT LLM confidence scaling — bot still works, just blunter. Not urgent, not optional.
+
+**Redis isn't running.** The dead-man-switch watchdog (`scripts/watchdog.py`) needs Redis for
+heartbeat polling. Without it, if the bot dies overnight nothing flattens positions or pages
+you. The bot itself ran 30+ minutes clean during my session so this isn't acute, but it's
+worth fixing — either start Redis (`docker run -p 6379:6379 redis`) or use a launchd unit
+to monitor the bot's PID directly.
