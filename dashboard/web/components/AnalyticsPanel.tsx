@@ -164,11 +164,27 @@ export function AnalyticsPanel() {
             <PerfStat
               label="LLM tok"
               value={
-                c ? `${((c.llm_input_tokens + c.llm_output_tokens) / 1000).toFixed(1)}k` : "—"
+                c &&
+                Number.isFinite(c.llm_input_tokens) &&
+                Number.isFinite(c.llm_output_tokens)
+                  ? `${((c.llm_input_tokens + c.llm_output_tokens) / 1000).toFixed(1)}k`
+                  : "—"
               }
             />
-            <PerfStat label="API req" value={c ? c.api_requests.toLocaleString() : "—"} />
-            <PerfStat label="USD est" value={c ? `$${c.estimated_usd.toFixed(3)}` : "—"} />
+            <PerfStat
+              label="API req"
+              value={
+                c && Number.isFinite(c.api_requests)
+                  ? c.api_requests.toLocaleString()
+                  : "—"
+              }
+            />
+            <PerfStat
+              label="USD est"
+              value={
+                c && Number.isFinite(c.estimated_usd) ? `$${c.estimated_usd.toFixed(3)}` : "—"
+              }
+            />
             <PerfStat
               label="sharpe"
               value={series.length < 2 ? "—" : sharpe.toFixed(2)}

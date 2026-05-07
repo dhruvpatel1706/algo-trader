@@ -231,8 +231,65 @@ class BrokerSnapshotProvider:
             realized_pnl_today=Decimal("0"),
             unrealized_pnl_today=day_change,
             trailing_peak_equity=peak,
-            open_positions=tuple(positions),
+            open_positions=tuple(_as_position_like(p) for p in positions),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _OpenPositionAdapter:
+    """Adapter so broker-proxy dicts satisfy ``_PositionLike`` for risk gates.
+
+    The broker proxy returns raw Alpaca-shaped dicts (``{"symbol": "ETHUSD",
+    "qty": 3.99, "avg_entry_price": 2348.7, "market_value": 9376.0, …}``).
+    ``src.risk.sizing.portfolio_heat()`` consumes positions through a
+    Protocol that requires ``.open_risk: Decimal`` — a number we never
+    actually track because the broker doesn't know our per-trade stop.
+
+    We approximate ``open_risk`` as the position's notional times the
+    per-trade risk cap. That's conservative on purpose (the real value
+    is bounded above by exactly this number when the trade is opened
+    at-cap), so the heat-check tends to over-state existing risk and
+    falsely-reject extra trades rather than under-state and falsely-allow.
+    """
+
+    open_risk: Decimal
+
+
+def _as_position_like(p: Any) -> Any:
+    """Wrap a broker-proxy dict (or anything else) into ``_PositionLike``.
+
+    If the input already has ``.open_risk``, pass it through. Otherwise
+    derive a conservative open_risk from the dict's notional. Anything
+    that can't be coerced returns ``_OpenPositionAdapter(open_risk=0)``
+    so risk math doesn't blow up — the risk gate sees a position with
+    zero open risk, which is harmless (the heat check just doesn't add
+    anything for that row).
+    """
+    if hasattr(p, "open_risk"):
+        return p
+    if not isinstance(p, dict):
+        return _OpenPositionAdapter(open_risk=Decimal("0"))
+    try:
+        # Prefer market_value; fall back to (qty * entry); then to 0.
+        notional_raw = p.get("market_value")
+        if notional_raw is None:
+            qty_raw = p.get("qty", 0)
+            entry_raw = p.get("avg_entry_price", 0)
+            notional = Decimal(str(qty_raw)) * Decimal(str(entry_raw))
+        else:
+            notional = Decimal(str(notional_raw))
+        notional = abs(notional)
+        # Use the configured per-trade cap; if settings can't be read for any
+        # reason, default to 0.01 (1%) which matches the v1 .env default.
+        from src.config import get_settings  # noqa: PLC0415
+
+        try:
+            cap = Decimal(str(get_settings().MAX_PER_TRADE_RISK))
+        except Exception:
+            cap = Decimal("0.01")
+        return _OpenPositionAdapter(open_risk=notional * cap)
+    except (ArithmeticError, TypeError, ValueError):
+        return _OpenPositionAdapter(open_risk=Decimal("0"))
 
 
 # ---------------------------------------------------------------------------

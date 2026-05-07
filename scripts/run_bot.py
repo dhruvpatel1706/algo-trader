@@ -212,8 +212,16 @@ def _prime_cache(bars_cache: Any, agents: dict[str, Any]) -> None:
 
 def build_runner() -> tuple[Runner, JournalWriter, dict[str, Any]]:
     """Construct (but don't start) the runner. Exposed for tests/integration."""
-    redis_url = os.environ.get("REDIS_URL")
-    runner = Runner(redis_url=redis_url)
+    # Force the in-memory APScheduler job store. We previously plumbed
+    # REDIS_URL through to RedisJobStore, but every job here is a closure
+    # (``_safe_call._wrapped``, ``_make_eval._run``, ``_gate_market_hours``)
+    # which APScheduler can't pickle by name — RedisJobStore.add_job raises
+    # ``ValueError: This Job cannot be serialized…`` and the runner exits
+    # before its first eval cycle. Cross-restart persistence has no value
+    # for us anyway: every startup re-registers the same fixed catalog of
+    # jobs in ``add_default_jobs()``, so the in-memory store is exactly
+    # what we want.
+    runner = Runner(redis_url=None)
 
     # The repo-wide convention is ``<repo>/journal/``. ``dashboard/api/kill.py``,
     # ``dashboard/api/journal_reader.py``, ``scripts/place_order.py`` and

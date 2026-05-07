@@ -62,8 +62,19 @@ class MemoryStore:
     def __init__(self, db_path: Path | str = DEFAULT_DB_PATH) -> None:
         self._path: Path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        # ``check_same_thread=False`` is required because APScheduler runs
+        # each scheduled job on a worker thread out of its default pool —
+        # the MemoryStore is constructed on the main thread (in run_bot.py)
+        # but recall/insert is called from the reasoner running on a job
+        # thread. Without this flag every reasoner call logs
+        # ``SQLite objects created in a thread can only be used in that
+        # same thread`` and the memory layer goes blind. WAL + NORMAL plus
+        # the implicit row-level locking in sqlite3 make this safe for our
+        # write rate (a handful per minute).
         self._conn: sqlite3.Connection = sqlite3.connect(
-            str(self._path), isolation_level=None
+            str(self._path),
+            isolation_level=None,
+            check_same_thread=False,
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")

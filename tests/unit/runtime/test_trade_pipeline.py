@@ -606,6 +606,76 @@ def test_broker_snapshot_provider_reads_account_and_positions() -> None:
     assert len(snap.open_positions) == 1
 
 
+def test_broker_snapshot_positions_are_position_like() -> None:
+    """Regression test for the production crash:
+    ``'dict' object has no attribute 'open_risk'`` thrown by
+    ``portfolio_heat()`` because BrokerSnapshotProvider was passing raw
+    Alpaca-shaped dicts into ``open_positions``. Every signal was being
+    refused with ``risk_cap_position`` for the wrong reason — the risk
+    gate never even ran.
+
+    Each open_position must satisfy the ``_PositionLike`` Protocol
+    (i.e. expose ``.open_risk: Decimal``) so the heat math works.
+    """
+    from src.risk.sizing import portfolio_heat
+
+    class FakeBrokerWithCryptoPosition:
+        def get_account(self) -> dict[str, Any]:
+            return {"equity": 100_000, "cash": 90_000}
+
+        def get_positions(self) -> list[dict[str, Any]]:
+            # Real shape from dashboard.api.broker_proxy.get_positions().
+            return [
+                {
+                    "symbol": "ETHUSD",
+                    "qty": 3.99,
+                    "avg_entry_price": 2348.70,
+                    "market_value": 9376.0,
+                    "unrealized_pl": 14.0,
+                    "unrealized_plpc": 0.0015,
+                    "current_price": 2352.0,
+                    "side": "long",
+                }
+            ]
+
+    provider = BrokerSnapshotProvider(FakeBrokerWithCryptoPosition())
+    snap = provider.snapshot()
+
+    # Each position exposes .open_risk and the heat math doesn't crash.
+    for p in snap.open_positions:
+        assert hasattr(p, "open_risk"), f"position {p!r} missing open_risk"
+        assert isinstance(p.open_risk, Decimal)
+    heat = portfolio_heat(snap.open_positions, snap.equity)
+    # Conservative estimate: market_value * MAX_PER_TRADE_RISK / equity
+    # = 9376 * 0.01 / 100_000 ≈ 0.000938
+    assert heat > Decimal("0")
+    assert heat < Decimal("0.01")  # heat from one small position is well under 1%
+
+
+def test_broker_snapshot_position_adapter_handles_missing_fields() -> None:
+    """A degenerate dict (no market_value) must not crash the snapshot."""
+    from src.risk.sizing import portfolio_heat
+
+    class FakeBrokerSparsePositions:
+        def get_account(self) -> dict[str, Any]:
+            return {"equity": 100_000}
+
+        def get_positions(self) -> list[dict[str, Any]]:
+            return [
+                {"symbol": "WEIRD", "qty": "not-a-number", "side": "long"},
+                {"symbol": "EMPTY"},  # nothing useful
+            ]
+
+    provider = BrokerSnapshotProvider(FakeBrokerSparsePositions())
+    snap = provider.snapshot()
+    assert len(snap.open_positions) == 2
+    for p in snap.open_positions:
+        assert hasattr(p, "open_risk")
+    heat = portfolio_heat(snap.open_positions, snap.equity)
+    # Both positions degrade to open_risk=0; heat should be 0.
+    assert heat == Decimal("0")
+
+
 def test_broker_snapshot_provider_tolerates_failure() -> None:
     class BrokenBroker:
         def get_account(self) -> dict[str, Any]:

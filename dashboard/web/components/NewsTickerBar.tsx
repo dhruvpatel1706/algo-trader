@@ -31,12 +31,16 @@ function arrow(t: TickerItem["tone"]): string {
 }
 
 function adapt(cells: SentimentCell[]): TickerItem[] {
-  return cells.slice(0, 16).map((c, i) => ({
-    key: `${c.ticker}-${c.date}-${i}`,
-    ticker: c.ticker,
-    text: `sentiment ${c.score >= 0 ? "+" : ""}${c.score.toFixed(2)} · vol ${c.volume.toLocaleString()}`,
-    tone: c.score > 0.1 ? "pos" : c.score < -0.1 ? "neg" : "neutral",
-  }));
+  return cells.slice(0, 16).map((c, i) => {
+    const score = Number.isFinite(c.score) ? c.score : 0;
+    const volTxt = Number.isFinite(c.volume) ? c.volume.toLocaleString() : "—";
+    return {
+      key: `${c.ticker}-${c.date}-${i}`,
+      ticker: c.ticker,
+      text: `sentiment ${score >= 0 ? "+" : ""}${score.toFixed(2)} · vol ${volTxt}`,
+      tone: score > 0.1 ? "pos" : score < -0.1 ? "neg" : "neutral",
+    };
+  });
 }
 
 export function NewsTickerBar() {
