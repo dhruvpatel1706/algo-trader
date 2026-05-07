@@ -250,9 +250,16 @@ class _OpenPositionAdapter:
     is bounded above by exactly this number when the trade is opened
     at-cap), so the heat-check tends to over-state existing risk and
     falsely-reject extra trades rather than under-state and falsely-allow.
+
+    ``symbol`` and ``notional`` are also carried so the cumulative-cap
+    check in ``check_limits`` can find existing exposure for the symbol
+    being traded. Empty string + 0 are the safe defaults when we couldn't
+    parse the broker dict.
     """
 
     open_risk: Decimal
+    symbol: str = ""
+    notional: Decimal = Decimal("0")
 
 
 def _as_position_like(p: Any) -> Any:
@@ -287,9 +294,67 @@ def _as_position_like(p: Any) -> Any:
             cap = Decimal(str(get_settings().MAX_PER_TRADE_RISK))
         except Exception:
             cap = Decimal("0.01")
-        return _OpenPositionAdapter(open_risk=notional * cap)
+        sym = str(p.get("symbol", "") or "")
+        return _OpenPositionAdapter(
+            open_risk=notional * cap,
+            symbol=sym,
+            notional=notional,
+        )
     except (ArithmeticError, TypeError, ValueError):
         return _OpenPositionAdapter(open_risk=Decimal("0"))
+
+
+def _existing_notional_in_symbol(positions: Any, symbol: str) -> Decimal:
+    """Sum absolute notional held in ``symbol`` across ``positions``.
+
+    Accepts both adapter instances (preferred shape, with ``.symbol`` and
+    ``.notional``) and raw broker dicts (fallback). Symbol matching is
+    normalized: 'ETHUSD' / 'ETH/USD' / 'ETHUSDT' all map to the same
+    canonical form so we don't double-count when the broker reports one
+    shape and the strategy proposes another.
+    """
+    target = _canonical_symbol(symbol)
+    total = Decimal("0")
+    for p in positions or ():
+        sym = ""
+        notional = Decimal("0")
+        if hasattr(p, "symbol") and hasattr(p, "notional"):
+            sym = str(getattr(p, "symbol", "") or "")
+            try:
+                notional = Decimal(str(getattr(p, "notional", 0) or 0))
+            except (ArithmeticError, TypeError, ValueError):
+                notional = Decimal("0")
+        elif isinstance(p, dict):
+            sym = str(p.get("symbol", "") or "")
+            mv = p.get("market_value")
+            if mv is None:
+                try:
+                    notional = Decimal(str(p.get("qty", 0))) * Decimal(
+                        str(p.get("avg_entry_price", 0))
+                    )
+                except (ArithmeticError, TypeError, ValueError):
+                    notional = Decimal("0")
+            else:
+                try:
+                    notional = Decimal(str(mv))
+                except (ArithmeticError, TypeError, ValueError):
+                    notional = Decimal("0")
+        if not sym:
+            continue
+        if _canonical_symbol(sym) == target:
+            total += abs(notional)
+    return total
+
+
+def _canonical_symbol(symbol: str) -> str:
+    """Normalize ETHUSD / ETH/USD / ETHUSDT / ETH-USD to a single form
+    so the cap check doesn't double-count when broker and strategy
+    disagree on quote-currency suffix shape."""
+    s = symbol.upper().replace("/", "").replace("-", "")
+    for quote in ("USDT", "USDC", "USD", "EUR", "BTC", "ETH"):
+        if s.endswith(quote) and len(s) > len(quote):
+            return f"{s[: -len(quote)]}USD"
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +558,13 @@ class TradePipeline:
             strategy_tag=sig.strategy_tag,
         )
         try:
-            decision = check_limits(proposed, snapshot)
+            decision = check_limits(
+                proposed,
+                snapshot,
+                existing_notional_in_symbol=_existing_notional_in_symbol(
+                    snapshot.open_positions, sig.symbol
+                ),
+            )
         except Exception as e:
             log.exception(
                 "trade_pipeline: check_limits raised for %s; refusing", sig.symbol

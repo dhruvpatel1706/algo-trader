@@ -32,7 +32,13 @@ def test_failed_breakout_crypto_loads_via_registry():
     # Crypto variant is also a FailedBreakout (subclass relationship preserved).
     assert isinstance(s, FailedBreakout)
     universe = s.universe()
-    assert universe == ("BTCUSDT", "ETHUSDT")
+    # Universe was widened from 2 -> 11 majors in commit 1e621e7 to keep the
+    # bot trading constantly on paper. Assert structure (BTC/ETH always
+    # present, all entries USDT-quoted) rather than a frozen list.
+    assert "BTCUSDT" in universe
+    assert "ETHUSDT" in universe
+    assert all(sym.endswith("USDT") for sym in universe)
+    assert len(universe) >= 2
 
 
 def test_failed_breakout_crypto_uses_crypto_tuned_params():

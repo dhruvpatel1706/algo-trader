@@ -45,8 +45,20 @@ class PortfolioSnapshot:
     open_positions: tuple = field(default_factory=tuple)
 
 
-def check_limits(proposed: ProposedTrade, snapshot: PortfolioSnapshot) -> Decision:
-    """Apply all v1 risk caps. Fail closed on any violation."""
+def check_limits(
+    proposed: ProposedTrade,
+    snapshot: PortfolioSnapshot,
+    *,
+    existing_notional_in_symbol: Decimal = Decimal("0"),
+) -> Decision:
+    """Apply all v1 risk caps. Fail closed on any violation.
+
+    ``existing_notional_in_symbol`` is the absolute USD value the account
+    already holds in ``proposed.symbol``. Pass 0 (default) for fresh
+    positions; pass the broker's market_value for adds. Without this the
+    per-symbol cap was checked against the new fill in isolation, which
+    let the bot stack ETH all the way to ~28% of equity despite a 10% cap.
+    """
     s = get_settings()
 
     if proposed.side == "buy" and proposed.stop >= proposed.entry:
@@ -70,21 +82,39 @@ def check_limits(proposed: ProposedTrade, snapshot: PortfolioSnapshot) -> Decisi
                 f"intraday P&L {intraday_pct:.2%} <= {s.DAILY_LOSS_HALT:.2%} — halted",
             )
 
+    # Reject early if the symbol is already at or past its per-symbol cap —
+    # produces a clear refusal reason instead of "computed size <= 0".
+    cap_budget_usd = (snapshot.equity * s.MAX_SINGLE_POSITION) - existing_notional_in_symbol
+    if cap_budget_usd <= 0:
+        return Decision(
+            False,
+            (
+                f"symbol already at single-position cap: "
+                f"existing {existing_notional_in_symbol} >= "
+                f"{s.MAX_SINGLE_POSITION:.0%} of equity {snapshot.equity}"
+            ),
+        )
+
     qty = position_size(
         equity=snapshot.equity,
         risk_pct=s.MAX_PER_TRADE_RISK,
         entry=proposed.entry,
         stop=proposed.stop,
         max_position_pct=s.MAX_SINGLE_POSITION,
+        existing_notional_in_symbol=existing_notional_in_symbol,
     )
     if qty <= 0:
         return Decision(False, "computed size <= 0 (stop too wide vs. risk cap)")
 
     notional = qty * proposed.entry
-    if notional > snapshot.equity * s.MAX_SINGLE_POSITION:
+    cumulative = notional + existing_notional_in_symbol
+    if cumulative > snapshot.equity * s.MAX_SINGLE_POSITION:
         return Decision(
             False,
-            f"notional {notional} > {s.MAX_SINGLE_POSITION:.0%} of equity",
+            (
+                f"cumulative notional {cumulative} (existing {existing_notional_in_symbol} + "
+                f"new {notional}) > {s.MAX_SINGLE_POSITION:.0%} of equity"
+            ),
         )
 
     new_risk = qty * abs(proposed.entry - proposed.stop)

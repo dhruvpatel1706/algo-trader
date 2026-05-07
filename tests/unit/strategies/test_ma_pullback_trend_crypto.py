@@ -24,7 +24,12 @@ def test_ma_pullback_trend_crypto_loads_via_registry():
     assert isinstance(s, MaPullbackTrendCrypto)
     assert isinstance(s, MaPullbackTrend)
     universe = s.universe()
-    assert universe == ("BTCUSDT", "ETHUSDT")
+    # Universe widened to 11 majors in commit 1e621e7. Assert structure not
+    # a frozen list so future universe changes don't ripple through tests.
+    assert "BTCUSDT" in universe
+    assert "ETHUSDT" in universe
+    assert all(sym.endswith("USDT") for sym in universe)
+    assert len(universe) >= 2
 
 
 def test_ma_pullback_trend_crypto_uses_crypto_tuned_params():

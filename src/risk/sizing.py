@@ -21,11 +21,20 @@ def position_size(
     stop: Decimal,
     *,
     max_position_pct: Decimal | None = None,
+    existing_notional_in_symbol: Decimal = Decimal("0"),
 ) -> int:
     """Integer share count sized to risk `risk_pct` of `equity` to a `stop`.
 
     qty = floor((equity * risk_pct) / max(|entry - stop|, EPS))
-    Capped to floor((equity * max_position_pct) / entry) if provided.
+    Capped to floor((equity * max_position_pct - existing_notional_in_symbol) / entry)
+    if `max_position_pct` is provided.
+
+    The ``existing_notional_in_symbol`` argument enables cumulative-cap
+    sizing: when there's already a $9 000 ETH position and the per-symbol
+    cap is 10% of $100 000, the new add can be at most $1 000 worth (not
+    a fresh $10 000), so this function subtracts existing exposure from
+    the cap budget BEFORE dividing by entry. Defaults to 0 so callers
+    that don't model existing positions keep the v1 behaviour.
     """
     if equity <= 0:
         raise ValueError("equity must be positive")
@@ -35,13 +44,20 @@ def position_size(
         raise ValueError("entry must be positive")
     if stop <= 0:
         raise ValueError("stop must be positive")
+    if existing_notional_in_symbol < 0:
+        raise ValueError("existing_notional_in_symbol must be non-negative")
 
     risk_per_share = max(abs(entry - stop), _EPS)
     raw = (equity * risk_pct) / risk_per_share
     qty = int(raw.to_integral_value(rounding=ROUND_DOWN))
 
     if max_position_pct is not None:
-        cap = int(((equity * max_position_pct) / entry).to_integral_value(rounding=ROUND_DOWN))
+        # Available cap budget = (equity * cap) - existing exposure to this
+        # symbol. Already saturated -> cap_budget <= 0 -> qty=0 (refusal).
+        cap_budget = (equity * max_position_pct) - existing_notional_in_symbol
+        if cap_budget <= 0:
+            return 0
+        cap = int((cap_budget / entry).to_integral_value(rounding=ROUND_DOWN))
         qty = min(qty, cap)
 
     return max(qty, 0)
