@@ -103,6 +103,7 @@ strategy_universes:
   ma_pullback_trend_bonds: bonds
   failed_breakout_crypto: crypto_majors
   ma_pullback_trend_crypto: crypto_majors
+  ema_ribbon_compression: crypto_majors
 
 # Coarse sector map used by the multi-strategy engine to enforce sector
 # exposure caps. Symbols not listed here are treated as `other`.
