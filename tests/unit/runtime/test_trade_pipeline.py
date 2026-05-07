@@ -676,6 +676,41 @@ def test_broker_snapshot_position_adapter_handles_missing_fields() -> None:
     assert heat == Decimal("0")
 
 
+def test_position_adapter_uses_max_of_mark_and_book_to_block_ratchet() -> None:
+    """Regression: when an existing position is in drawdown (mark < book),
+    the cumulative-cap check must use BOOK value, not mark — otherwise
+    a position right at the 10% cap appears under-cap as soon as price
+    dips, and the bot keeps adding small increments each cycle. Live
+    failure on 2026-05-07: DOGE crept from 90 487 to 90 878 units across
+    several boundary-grinding cycles before this fix landed."""
+    from src.runtime.trade_pipeline import _as_position_like
+
+    # Position in drawdown: book = 100 * 100 = $10 000, mark = $9 000.
+    drawdown = {
+        "symbol": "DOGEUSD",
+        "qty": "100",
+        "avg_entry_price": "100",
+        "market_value": "9000",
+    }
+    adapter = _as_position_like(drawdown)
+    # Notional must be the book value ($10 000), not the depressed mark.
+    assert adapter.notional == Decimal("10000"), (
+        f"expected book value 10000 (max of mark and book) "
+        f"but got {adapter.notional}"
+    )
+
+    # Position above water: mark > book → mark wins (no harm; this is the
+    # honest mark-to-market value of the position).
+    above_water = {
+        "symbol": "DOGEUSD",
+        "qty": "100",
+        "avg_entry_price": "100",
+        "market_value": "11000",
+    }
+    adapter = _as_position_like(above_water)
+    assert adapter.notional == Decimal("11000")
+
+
 def test_broker_snapshot_provider_tolerates_failure() -> None:
     class BrokenBroker:
         def get_account(self) -> dict[str, Any]:

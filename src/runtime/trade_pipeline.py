@@ -277,15 +277,27 @@ def _as_position_like(p: Any) -> Any:
     if not isinstance(p, dict):
         return _OpenPositionAdapter(open_risk=Decimal("0"))
     try:
-        # Prefer market_value; fall back to (qty * entry); then to 0.
-        notional_raw = p.get("market_value")
-        if notional_raw is None:
-            qty_raw = p.get("qty", 0)
-            entry_raw = p.get("avg_entry_price", 0)
-            notional = Decimal(str(qty_raw)) * Decimal(str(entry_raw))
-        else:
-            notional = Decimal(str(notional_raw))
-        notional = abs(notional)
+        # Use the MAX of mark-to-market (market_value) and book value
+        # (qty * avg_entry_price) so the cumulative-cap check doesn't
+        # leak budget when an existing position is in drawdown. Without
+        # this, a position right at the 10% cap appears under cap as
+        # soon as price dips, the cap check approves a tiny add, and
+        # over many cycles the position ratchets up — observed live on
+        # 2026-05-07 when DOGE crept from 90 487 → 90 878 units across
+        # several boundary-grinding cycles. Both values can be missing
+        # from a partial broker dict, so we degrade gracefully.
+        mv_raw = p.get("market_value")
+        qty_raw = p.get("qty", 0)
+        entry_raw = p.get("avg_entry_price", 0)
+        try:
+            book = abs(Decimal(str(qty_raw)) * Decimal(str(entry_raw)))
+        except (ArithmeticError, TypeError, ValueError):
+            book = Decimal("0")
+        try:
+            mark = abs(Decimal(str(mv_raw))) if mv_raw is not None else Decimal("0")
+        except (ArithmeticError, TypeError, ValueError):
+            mark = Decimal("0")
+        notional = max(mark, book)
         # Use the configured per-trade cap; if settings can't be read for any
         # reason, default to 0.01 (1%) which matches the v1 .env default.
         from src.config import get_settings  # noqa: PLC0415
