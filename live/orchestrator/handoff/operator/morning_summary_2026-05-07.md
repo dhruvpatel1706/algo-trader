@@ -1,10 +1,10 @@
 # Morning Summary — 2026-05-07 (overnight session)
 
-**TL;DR:** Bot is up, healthy, and now running with all overnight fixes applied (cumulative cap, LLM cooldown, new EMA Ribbon strategy). 5 over-cap crypto positions from before the fix are still open and will only resolve when their exits fire — that's expected, not a bug. New dashboard panel surfaces what the parallel researcher session is recommending.
+**TL;DR:** Bot is up, healthy, running 4 long-only crypto strategies (was 2). All overnight fixes are live and verified in production: cumulative cap, LLM cooldown, EMA Ribbon Compression, Funding Rate Divergence. 2 of 4 researcher proposals are now shipped. 5 over-cap crypto positions from before the cap fix are still open and will only resolve when their exits fire — expected, not a bug. New dashboard panel surfaces what the parallel researcher session is recommending.
 
 ---
 
-## What landed tonight (12 commits)
+## What landed tonight (15 commits)
 
 | Commit | What | Why |
 |---|---|---|
@@ -18,8 +18,11 @@
 | `f9dc3c5` | Orchestrator surfaces out-of-spec session outputs | Postel's law on read |
 | `d6b3d8c` | Funding rate Bybit + OKX fallbacks | Binance HTTP 451 was killing funding ingest |
 | `83b67bc` | **LLM router cooldown** | 5-min skip on per-provider failure. Stopped 180 dead-provider calls/hour during the outage. |
-| `4da1b1a` | **EMA Ribbon Compression Breakout strategy** | Researcher session's #1 pick from `docs/improvements/strategies/`. 8 unit tests, registered to `crypto_majors`. |
+| `4da1b1a` | **EMA Ribbon Compression Breakout strategy** | Researcher session's #1 pick. 8 unit tests, registered to `crypto_majors`. |
 | `e1f1f81` | **Research proposals dashboard panel** | Surfaces parallel researcher's queue + watchlist + top confluence without context-switching to a worktree |
+| `ea3ba1b` + `bf70661` | Morning summary doc | This file. |
+| `c3d8079` | **Funding-rate divergence strategy** | Researcher proposal #2. Crowded-shorts mean reversion: funding < -0.03%/8h + RSI <35 + price near lower BB → 2R long with stop at bb_lower. 10 unit tests, dependency-injected fetcher (default = our 3-venue funding chain). |
+| `ae5a7fc` | **CryptoAgent now runs 4 strategies** | Wired EMA Ribbon + Funding Rate Divergence into the default deck. Both signals flow through the same risk gate so they can't violate caps. |
 
 ---
 
@@ -67,7 +70,7 @@ The orchestrator panel + new research proposals panel show real-time state. Quic
 | Rank | Strategy | Status |
 |---|---|---|
 | 1 | `ema_ribbon_compression_breakout` | **shipped** ✅ |
-| 2 | `funding_rate_divergence` | proposed (needs Bybit fallback — done in commit d6b3d8c, can implement) |
+| 2 | `funding_rate_divergence` | **shipped** ✅ |
 | 3 | `vwap_nyse_open_retest` | proposed (requires 5m bars; loader supports it) |
 | 4 | `on_chain_whale_flow` | proposed (needs new `src/data/onchain.py`) |
 
@@ -90,9 +93,9 @@ The orchestrator panel + new research proposals panel show real-time state. Quic
 
 ## Tests
 
-Full unit suite: **1312 passed, 1 skipped** (the skip is the optional native module). Lint clean across all changed files.
+Full unit suite: **1326 passed, 1 skipped** (the skip is the optional native module). Lint clean across all changed files.
 
-8 new tests for EMA Ribbon Compression. 4 new tests for the research proposals endpoint.
+8 new tests for EMA Ribbon Compression. 10 new tests for Funding Rate Divergence. 4 new tests for the research proposals endpoint. Updated the crypto_agent test from "wires-two-strategies" to a type-set assertion that won't silently break on future additions.
 
 ---
 
