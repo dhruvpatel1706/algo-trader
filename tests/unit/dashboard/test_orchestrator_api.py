@@ -207,3 +207,108 @@ def test_stale_top_level_lock_with_dead_pid_not_held(client: TestClient):
     state = body["roles"]["backtester"]
     assert state["lock_held"] is False
     assert state["lock_pid"] is None
+
+
+# ---------------------------------------------------------------------------
+# /api/orchestrator/research_proposals
+# ---------------------------------------------------------------------------
+
+
+def _write_researcher_brief(orch_root: Path, payload: dict) -> None:
+    (orch_root / "researcher_brief.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+
+def test_research_proposals_empty_when_no_brief(client: TestClient):
+    """No researcher brief on disk → empty proposals + watchlist, never crash."""
+    body = client.get("/api/orchestrator/research_proposals").json()
+    assert body["proposals"] == []
+    assert body["watchlist"] == []
+    assert body["top_confluence"] == []
+    assert body["regime"] is None
+
+
+def test_research_proposals_marks_implemented_strategies(client: TestClient):
+    """A proposal whose slug maps to an existing src/strategies/<slug>.py
+    must surface as status='implemented'. We use ema_ribbon_compression
+    (which IS shipped) and confirm the suffix-stripping picks it up from
+    the proposal slug 'ema_ribbon_compression_breakout'."""
+    from dashboard.api import orchestrator as m
+
+    _write_researcher_brief(
+        m.ORCHESTRATOR_DIR,
+        {
+            "last_run_utc": "2026-05-07T02:51:17Z",
+            "new_strategy_proposals": {
+                "priority_order": [
+                    "1. ema_ribbon_compression_breakout — shipped today",
+                    "2. funding_rate_divergence — needs Bybit fallback",
+                    "3. on_chain_whale_flow — needs new data source",
+                ],
+            },
+        },
+    )
+    body = client.get("/api/orchestrator/research_proposals").json()
+    by_slug = {p["slug"]: p for p in body["proposals"]}
+    assert by_slug["ema_ribbon_compression_breakout"]["status"] == "implemented"
+    assert by_slug["funding_rate_divergence"]["status"] == "proposed"
+    assert by_slug["on_chain_whale_flow"]["status"] == "proposed"
+    # rank preserved from priority_order
+    assert by_slug["ema_ribbon_compression_breakout"]["rank"] == 1
+    # rationale extracted from the em-dash split
+    assert "shipped today" in by_slug["ema_ribbon_compression_breakout"]["rationale"]
+
+
+def test_research_proposals_surfaces_watchlist_with_triggers(client: TestClient):
+    from dashboard.api import orchestrator as m
+
+    _write_researcher_brief(
+        m.ORCHESTRATOR_DIR,
+        {
+            "last_run_utc": "2026-05-07T02:51:17Z",
+            "market_observations": {
+                "regime": "correction / consolidation",
+                "watchlist_for_next_session": ["DOGEUSDT", "ETHUSDT"],
+                "key_levels": {
+                    "DOGEUSDT": {"rsi": 28.81, "adx": 38.64, "bb_pct_b": 0.083},
+                    "ETHUSDT": {"rsi": 29.92, "adx": 22.01, "bb_pct_b": 0.098},
+                },
+                "trigger_conditions": {
+                    "DOGEUSDT": "MACD histogram crosses zero from below",
+                    "ETHUSDT": "ADX expands above 25 with RSI <35",
+                },
+            },
+        },
+    )
+    body = client.get("/api/orchestrator/research_proposals").json()
+    assert body["regime"] == "correction / consolidation"
+    by_sym = {w["symbol"]: w for w in body["watchlist"]}
+    assert by_sym["DOGEUSDT"]["adx"] == 38.64
+    assert by_sym["DOGEUSDT"]["trigger"].startswith("MACD")
+    assert by_sym["ETHUSDT"]["rsi"] == 29.92
+
+
+def test_research_proposals_top_confluence_ranked(client: TestClient):
+    from dashboard.api import orchestrator as m
+
+    _write_researcher_brief(
+        m.ORCHESTRATOR_DIR,
+        {
+            "threshold": 0.70,
+            "scan_results_ranked": [
+                {"symbol": "DOGEUSDT", "confluence": 0.59, "direction": "long"},
+                {"symbol": "ETHUSDT", "confluence": 0.45, "direction": "long"},
+                {"symbol": "AVAXUSDT", "confluence": 0.30, "direction": "long"},
+                {"symbol": "BTCUSDT", "confluence": 0.225, "direction": "long"},
+                {"symbol": "LTCUSDT", "confluence": 0.225, "direction": "long"},
+                {"symbol": "EXTRA", "confluence": 0.0, "direction": "neutral"},
+            ],
+        },
+    )
+    body = client.get("/api/orchestrator/research_proposals").json()
+    assert body["threshold"] == 0.70
+    # Only top 5 returned even when more entries exist.
+    assert len(body["top_confluence"]) == 5
+    assert body["top_confluence"][0]["symbol"] == "DOGEUSDT"
+    assert body["top_confluence"][0]["confluence"] == 0.59

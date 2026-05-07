@@ -77,6 +77,17 @@ const OrchestratorPanel = dynamic(
   },
 );
 
+const ResearchProposalsPanel = dynamic(
+  () =>
+    import("@/components/ResearchProposalsPanel").then(
+      (m) => m.ResearchProposalsPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => <div className="h-64 rounded-2xl border border-border bg-surface" />,
+  },
+);
+
 export function PortfolioView() {
   return (
     <>
@@ -111,6 +122,8 @@ export function PortfolioView() {
         <AnalyticsPanel />
 
         <OrchestratorPanel />
+
+        <ResearchProposalsPanel />
 
         <LivePositionsTable />
 
