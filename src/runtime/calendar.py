@@ -22,7 +22,7 @@ UTC = ZoneInfo("UTC")
 
 AssetClass = Literal["equity", "gold", "bonds", "crypto"]
 
-_NYSE_LIKE: frozenset[str] = frozenset({"equity", "gold", "bonds"})
+_NYSE_LIKE: frozenset[str] = frozenset({"equity", "gold", "silver", "bonds"})
 
 # NYSE regular hours (no early-close handling in v1; half-days are still
 # considered open until 16:00 ET, which biases conservative-late rather than
