@@ -7,7 +7,6 @@ importing inside score_article picks it up without ever hitting the network.
 from __future__ import annotations
 
 import sys
-import types
 from datetime import UTC, date, datetime
 from typing import ClassVar
 
@@ -121,30 +120,7 @@ def test_score_article_returns_stub_when_anthropic_not_installed(monkeypatch):
     assert out.score == 0.0
 
 
-# --- score_article: mocked API path ---------------------------------------------------
-
-
-class _FakeBlock:
-    def __init__(self, text: str):
-        self.text = text
-
-
-class _FakeMessage:
-    def __init__(self, text: str):
-        self.content = [_FakeBlock(text)]
-
-
-class _FakeMessages:
-    def __init__(self, recorder: dict, response_text: str):
-        self._recorder = recorder
-        self._response_text = response_text
-
-    def create(self, *, model, max_tokens, system, messages, **_):
-        self._recorder["model"] = model
-        self._recorder["max_tokens"] = max_tokens
-        self._recorder["system"] = system
-        self._recorder["messages"] = messages
-        return _FakeMessage(self._response_text)
+# --- score_article: mocked router path -----------------------------------------------
 
 
 _DEFAULT_RESPONSE = (
@@ -152,29 +128,56 @@ _DEFAULT_RESPONSE = (
 )
 
 
-class _FakeAnthropic:
+class _FakeRouter:
+    """Fake router that records every call() invocation. The sentiment
+    module was refactored to route through ``src.llm.router.default_router()``
+    instead of importing the Anthropic SDK directly, so tests now patch
+    the router rather than the SDK."""
+
     last_recorder: ClassVar[dict] = {}
     response_text: ClassVar[str] = _DEFAULT_RESPONSE
+    response_provider: ClassVar[str] = "gemini"
+    response_model: ClassVar[str] = "gemini-2.5-flash"
+    raise_on_call: ClassVar[Exception | None] = None
 
-    def __init__(self, api_key=None):
-        _FakeAnthropic.last_recorder["api_key"] = api_key
-        self.messages = _FakeMessages(_FakeAnthropic.last_recorder, _FakeAnthropic.response_text)
+    def call(self, *, system, user, max_tokens, temperature):
+        from src.llm.router import LLMResponse
+
+        _FakeRouter.last_recorder["system"] = system
+        _FakeRouter.last_recorder["user"] = user
+        _FakeRouter.last_recorder["max_tokens"] = max_tokens
+        _FakeRouter.last_recorder["temperature"] = temperature
+        if _FakeRouter.raise_on_call is not None:
+            raise _FakeRouter.raise_on_call
+        return LLMResponse(
+            text=_FakeRouter.response_text,
+            provider=_FakeRouter.response_provider,  # type: ignore[arg-type]
+            model=_FakeRouter.response_model,
+        )
 
 
-def _install_fake_anthropic(monkeypatch, response_text: str | None = None):
-    """Install a fake `anthropic` module on sys.modules so the lazy import resolves."""
-    fake_module = types.ModuleType("anthropic")
+def _install_fake_router(
+    monkeypatch,
+    response_text: str | None = None,
+    raise_on_call: Exception | None = None,
+):
+    """Patch the router singleton so score_article goes through the fake."""
     if response_text is not None:
-        _FakeAnthropic.response_text = response_text
-    fake_module.Anthropic = _FakeAnthropic
-    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
-    _FakeAnthropic.last_recorder = {}
+        _FakeRouter.response_text = response_text
+    else:
+        _FakeRouter.response_text = _DEFAULT_RESPONSE
+    _FakeRouter.raise_on_call = raise_on_call
+    _FakeRouter.last_recorder = {}
+    fake_router = _FakeRouter()
+    # Patch where ``score_article`` imports it from (lazy import inside the
+    # function — patching the module attribute is what gets picked up).
+    import src.llm.router as router_mod
+
+    monkeypatch.setattr(router_mod, "default_router", lambda: fake_router)
 
 
-def test_score_article_uses_anthropic_and_parses_response(monkeypatch):
-    _install_fake_anthropic(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+def test_score_article_uses_router_and_parses_response(monkeypatch):
+    _install_fake_router(monkeypatch)
     article = _make_article()
     out = score_article(article, today=date(2024, 1, 15))
 
@@ -183,26 +186,24 @@ def test_score_article_uses_anthropic_and_parses_response(monkeypatch):
     assert out.label == "bullish"
     assert out.confidence == pytest.approx(0.8)
     assert out.article_id == article.id
-    assert _FakeAnthropic.last_recorder["api_key"] == "fake-key"
+    # Model field now records "provider/model" because the router
+    # decides which model served the request.
+    assert "/" in out.model
 
 
 def test_score_article_includes_today_date_in_prompt(monkeypatch):
-    _install_fake_anthropic(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+    _install_fake_router(monkeypatch)
     article = _make_article()
     today = date(2024, 1, 15)
     score_article(article, today=today)
 
-    system_prompt = _FakeAnthropic.last_recorder["system"]
+    system_prompt = _FakeRouter.last_recorder["system"]
     assert "2024-01-15" in system_prompt
     assert "do not know what happens after this date" in system_prompt
 
 
 def test_score_article_anonymizes_user_prompt(monkeypatch):
-    _install_fake_anthropic(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+    _install_fake_router(monkeypatch)
     article = _make_article(
         ticker="AAPL",
         headline="Apple (AAPL) crushes earnings",
@@ -210,70 +211,59 @@ def test_score_article_anonymizes_user_prompt(monkeypatch):
     )
     score_article(article, today=date(2024, 1, 15))
 
-    user_msg = _FakeAnthropic.last_recorder["messages"][0]["content"]
+    user_msg = _FakeRouter.last_recorder["user"]
     # The ticker and company name must not appear in the prompt sent to the model.
     assert "AAPL" not in user_msg
     assert "Apple" not in user_msg
     assert "[ASSET_" in user_msg
 
 
-def test_score_article_uses_default_haiku_model(monkeypatch):
-    _install_fake_anthropic(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+def test_score_article_records_provider_and_model_in_result(monkeypatch):
+    """The model field on SentimentScore should now reflect WHICH provider
+    actually served the request, since the chain may fall through."""
+    _FakeRouter.response_provider = "gemini"
+    _FakeRouter.response_model = "gemini-2.0-flash"
+    _install_fake_router(monkeypatch)
 
-    score_article(_make_article(), today=date(2024, 1, 15))
-    assert _FakeAnthropic.last_recorder["model"] == "claude-haiku-4-5-20251001"
+    out = score_article(_make_article(), today=date(2024, 1, 15))
+    assert out.model == "gemini/gemini-2.0-flash"
 
 
 def test_score_article_clamps_out_of_range_score(monkeypatch):
-    _install_fake_anthropic(
+    _install_fake_router(
         monkeypatch,
         response_text='{"score": 2.5, "label": "bullish", "confidence": 1.5}',
     )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
     out = score_article(_make_article(), today=date(2024, 1, 15))
     assert out.score == 1.0
     assert out.confidence == 1.0
 
 
 def test_score_article_falls_back_to_stub_on_unparseable_response(monkeypatch):
-    _install_fake_anthropic(monkeypatch, response_text="not json at all")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+    _install_fake_router(monkeypatch, response_text="not json at all")
     out = score_article(_make_article(), today=date(2024, 1, 15))
     assert out.model == "stub"
     assert out.score == 0.0
 
 
-def test_score_article_falls_back_to_stub_on_api_exception(monkeypatch):
-    """If the Anthropic client raises, return the neutral stub."""
+def test_score_article_falls_back_to_stub_on_router_exception(monkeypatch):
+    """If every provider in the router chain fails, return the neutral stub."""
+    from src.llm.router import LLMUnavailableError
 
-    class _RaisingMessages:
-        def create(self, **_):
-            raise RuntimeError("network down")
-
-    class _RaisingAnthropic:
-        def __init__(self, api_key=None):
-            self.messages = _RaisingMessages()
-
-    fake_module = types.ModuleType("anthropic")
-    fake_module.Anthropic = _RaisingAnthropic
-    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
+    _install_fake_router(
+        monkeypatch,
+        raise_on_call=LLMUnavailableError("all providers down"),
+    )
     out = score_article(_make_article(), today=date(2024, 1, 15))
     assert out.model == "stub"
     assert out.score == 0.0
 
 
 def test_score_article_handles_fenced_json_response(monkeypatch):
-    _install_fake_anthropic(
+    _install_fake_router(
         monkeypatch,
         response_text='```json\n{"score": -0.5, "label": "bearish", "confidence": 0.6}\n```',
     )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-
     out = score_article(_make_article(), today=date(2024, 1, 15))
     assert out.score == pytest.approx(-0.5)
     assert out.label == "bearish"

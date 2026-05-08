@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -201,7 +200,12 @@ def score_article(
     today: date,
     model: str = _DEFAULT_MODEL,
 ) -> SentimentScore:
-    """Score a single article using the Anthropic API (Haiku 4.5 by default).
+    """Score a single article using the multi-provider LLM router.
+
+    The router falls through Gemini family (5 models, free-tier RPD
+    each) → Anthropic Haiku 4.5 → OpenAI gpt-4.1-mini, so sentiment
+    scoring keeps working even when one or two providers are
+    quota-exhausted.
 
     Build the prompt:
       - System: "You are a financial news sentiment scorer. Today's date is {today}.
@@ -210,41 +214,31 @@ def score_article(
 
     Cache strategy: caller is responsible (Redis). This function just calls.
 
-    If ANTHROPIC_API_KEY env var is unset, return a neutral score=0 with model="stub"
-    (graceful no-op for testing).
+    The legacy ``model`` parameter is preserved for back-compat but
+    ignored — the router picks the model. Use the router directly if
+    you need to pin a specific model.
+
+    Returns a stub neutral score (model="stub") when no LLM provider is
+    reachable.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return _stub_score(article.id)
-
-    try:
-        import anthropic  # type: ignore[import-not-found]  # noqa: PLC0415
-    except ImportError:
-        return _stub_score(article.id)
-
     system_prompt, user_prompt = _build_prompt(article, today)
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model=model,
-            max_tokens=400,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+        from src.llm.router import LLMUnavailableError, default_router  # noqa: PLC0415
+
+        try:
+            response = default_router().call(
+                system=system_prompt,
+                user=user_prompt,
+                max_tokens=400,
+                temperature=0.0,
+            )
+        except LLMUnavailableError:
+            return _stub_score(article.id)
+        raw_text = response.text or ""
+        used_model = f"{response.provider}/{response.model}"
     except Exception:
         return _stub_score(article.id)
-
-    # Extract text content from the response.
-    raw_text = ""
-    content = getattr(message, "content", None)
-    if isinstance(content, list):
-        for block in content:
-            text = getattr(block, "text", None)
-            if isinstance(text, str):
-                raw_text += text
-    elif isinstance(content, str):
-        raw_text = content
 
     parsed = _parse_response_text(raw_text)
     if parsed is None:
@@ -271,6 +265,6 @@ def score_article(
         score=score,
         label=label,
         confidence=confidence,
-        model=model,
+        model=used_model,
         scored_at=datetime.now(tz=UTC),
     )

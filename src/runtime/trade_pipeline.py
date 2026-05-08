@@ -126,6 +126,14 @@ class ExecutionStep:
     # label that produced the scalar (None when scalar=1.0 by default).
     regime_scalar: float = 1.0
     regime_label: str | None = None
+    # Alt-data multiplier (equity-only). 1.0 means the layer was disabled
+    # (non-equity asset class, no fetchers wired, or no source fired).
+    # Sourced from :func:`src.agents.alt_data_multiplier.compute_alt_data_multiplier`.
+    alt_data_multiplier: float = 1.0
+    # Optional human-readable trace of which alt-data sources contributed
+    # (insider cluster, Congress watchlist, news sentiment). None when
+    # the layer was skipped.
+    alt_data_reasoning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict for journal / dashboard use."""
@@ -412,6 +420,7 @@ class TradePipeline:
         *,
         reasoner: Any = None,
         analyst: Any = None,
+        alt_data_fn: Any = None,
         outcome_capture: Any = None,
         compliance_auto_approve_reason: str = (
             "v1 equity has no compliance gate beyond risk"
@@ -428,6 +437,13 @@ class TradePipeline:
         # analyst's multi-timeframe TV ratings + chart context veto
         # demonstrably bad setups before any LLM cost is incurred.
         self._analyst = analyst
+        # Optional alt-data multiplier
+        # (see :mod:`src.agents.alt_data_multiplier`). Equity-only.
+        # Composes insider Form 4 cluster + Quiver Congress watchlist +
+        # Finnhub news sentiment into a [0.7, 1.3] multiplier. ``None``
+        # disables this layer entirely (multiplier=1.0 throughout).
+        # Signature: ``(symbol, side, asset_class) -> AltDataVerdict``.
+        self._alt_data_fn = alt_data_fn
         self._outcome_capture = outcome_capture
         self._compliance_auto_approve_reason = compliance_auto_approve_reason
         self._pending_notional: dict[str, Decimal] = {}
@@ -702,13 +718,41 @@ class TradePipeline:
                     },
                 )
 
-        # Final multiplier = analyst x reasoner. Analyst contributes
-        # 0.5..1.2 from TV multi-timeframe alignment; reasoner contributes
-        # 0..1 from LLM judgment. Both default to 1.0 when absent.
+        # ----- Alt-data multiplier --------------------------------------
+        # Equity-only confidence multiplier composed from insider Form 4
+        # cluster + Quiver Congress watchlist + Finnhub news sentiment.
+        # Clamped to [0.7, 1.3] so any single source can't dominate the
+        # sizing math. Returns 1.0 (passthrough) for non-equity asset
+        # classes and when no fetchers are wired.
+        alt_data_multiplier: float = 1.0
+        alt_data_verdict: Any = None
+        if self._alt_data_fn is not None:
+            try:
+                alt_data_verdict = self._alt_data_fn(
+                    sig.symbol,
+                    sig.side,
+                    str(getattr(agent, "asset_class", "equity")),
+                )
+            except Exception:
+                log.exception(
+                    "trade_pipeline: alt_data_fn raised for %s; multiplier=1.0",
+                    sig.symbol,
+                )
+                alt_data_verdict = None
+            if alt_data_verdict is not None:
+                alt_data_multiplier = float(
+                    getattr(alt_data_verdict, "multiplier", 1.0)
+                )
+
+        # Final multiplier = analyst x alt_data x reasoner. Analyst
+        # contributes 0.5..1.2 from TV multi-timeframe alignment;
+        # alt_data contributes 0.7..1.3 from insider/Congress/news;
+        # reasoner contributes 0..1 from LLM judgment. All default to
+        # 1.0 when their layer is absent or its source returns nothing.
         _reasoner_part = (
             reasoner_multiplier if reasoner_multiplier is not None else 1.0
         )
-        applied_multiplier = analyst_multiplier * _reasoner_part
+        applied_multiplier = analyst_multiplier * alt_data_multiplier * _reasoner_part
 
         # ----- Regime scalar --------------------------------------------
         # Apply the SPY-derived macro-regime exposure multiplier on top of
@@ -753,6 +797,12 @@ class TradePipeline:
                 risk_decision_reason=detail,
                 regime_scalar=regime_scalar,
                 regime_label=regime_label,
+                alt_data_multiplier=alt_data_multiplier,
+                alt_data_reasoning=(
+                    getattr(alt_data_verdict, "reasoning", None)
+                    if alt_data_verdict is not None
+                    else None
+                ),
             )
 
         final_confidence = max(
@@ -974,6 +1024,12 @@ class TradePipeline:
             refusal_detail=None,
             regime_scalar=regime_scalar,
             regime_label=regime_label,
+            alt_data_multiplier=alt_data_multiplier,
+            alt_data_reasoning=(
+                getattr(alt_data_verdict, "reasoning", None)
+                if alt_data_verdict is not None
+                else None
+            ),
         )
 
     # -- helpers ---------------------------------------------------------
