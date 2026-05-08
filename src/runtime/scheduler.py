@@ -171,6 +171,7 @@ class Runner:
 
         - ``equity_agent.eval``     - every 5 min, gated to NYSE hours
         - ``gold_agent.eval``       - every 5 min, gated to NYSE hours
+        - ``silver_agent.eval``     - every 5 min, gated to NYSE hours
         - ``bonds_agent.eval``      - every 5 min, gated to NYSE hours
         - ``crypto_agent.eval``     - every 5 min, 24/7
         - ``governance_agent.eval`` - hourly
@@ -266,7 +267,9 @@ class Runner:
             return _run
 
         # NYSE-gated equity-class agents (5-min cadence).
-        for name in ("equity", "gold", "bonds"):
+        # Silver runs alongside gold — both trade NYSE-listed ETFs (SLV,
+        # GLD, etc.) so they share the equity-hours gate.
+        for name in ("equity", "gold", "silver", "bonds"):
             agent = agents.get(name)
             if agent is None:
                 continue
@@ -315,7 +318,7 @@ class Runner:
         if live_pipeline:
 
             def _equity_refresh() -> None:
-                for cls_name in ("equity", "gold", "bonds"):
+                for cls_name in ("equity", "gold", "silver", "bonds"):
                     agent = agents.get(cls_name)
                     if agent is None:
                         continue

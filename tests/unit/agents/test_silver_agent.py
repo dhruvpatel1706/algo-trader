@@ -16,13 +16,22 @@ def test_silver_agent_default_universe_non_empty():
     assert "SLV" in a.universe
 
 
-def test_silver_agent_starts_with_empty_strategy_list():
+def test_silver_agent_default_loadout_reuses_gold_tuning():
+    """v2: silver_agent reuses the gold-tuned strategies because silver
+    is essentially a high-beta amplifier of gold's macro driver. We pin
+    the strategy names so a future silver-specific tuning that diverges
+    from gold (e.g. SIL miners need their own ATR multiplier) must
+    update this test as part of the refactor."""
     a = SilverAgent()
-    assert a.strategies == []
+    names = [s.name for s in a.strategies]
+    assert "ma_pullback_trend_gold" in names
+    assert "failed_breakout_gold" in names
+    assert len(a.strategies) >= 2
 
 
 def test_silver_agent_evaluate_returns_empty_with_no_strategies():
-    a = SilverAgent()
+    """Caller can still inject an empty strategies list explicitly."""
+    a = SilverAgent(strategies=[])
     out = a.evaluate({})
     assert out == []
     assert a._last_eval_ts is not None
