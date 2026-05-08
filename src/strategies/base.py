@@ -35,6 +35,15 @@ class Strategy(ABC):
     name: str = "<unnamed>"
     params: Any = None
 
+    # Bar interval the strategy expects in its ``generate_signals`` input.
+    # The default ``"1d"`` matches what the daily bars cache feeds. Crypto
+    # strategies that operate on intra-day timeframes (e.g.
+    # :class:`~src.strategies.ema_ribbon_compression.EmaRibbonCompression`)
+    # override this so the runtime fetches the right interval. Recognised
+    # values match the ``interval`` arg of :func:`load_crypto_bars`:
+    # ``"5m"``, ``"15m"``, ``"1h"``, ``"4h"``, ``"1d"``.
+    bar_interval: str = "1d"
+
     @abstractmethod
     def universe(self) -> tuple[str, ...]:
         """Tickers this strategy operates on."""

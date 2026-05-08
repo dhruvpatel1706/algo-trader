@@ -80,9 +80,17 @@ class EmaRibbonCompressionParams:
 
 
 class EmaRibbonCompression(Strategy):
-    """Long-only EMA ribbon compression breakout. Crypto-tuned defaults."""
+    """Long-only EMA ribbon compression breakout. Crypto-tuned defaults.
+
+    Operates on 4h crypto bars: the default 0.5% compression spread is
+    impossible on daily bars (typical daily ATR is 2-5% of close), so on
+    daily data this strategy fires zero signals. The Researcher's
+    proposal explicitly specs the 4h timeframe; the runtime now respects
+    that via the ``bar_interval`` declaration.
+    """
 
     name = "ema_ribbon_compression"
+    bar_interval = "4h"
 
     def __init__(self, params: EmaRibbonCompressionParams | None = None) -> None:
         self.params = params if params is not None else EmaRibbonCompressionParams()
