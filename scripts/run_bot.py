@@ -161,7 +161,7 @@ def _build_analyst() -> Any:
     """
     try:
         from src.agents.analyst import Analyst
-    except Exception as e:  # noqa: BLE001 — degrade gracefully
+    except Exception as e:
         log.warning("Analyst not constructed (%s); pipeline will skip analyst step", e)
         return None
     # Reuse the same LLM router the autonomous reasoner uses so we share
@@ -172,7 +172,7 @@ def _build_analyst() -> Any:
         from src.llm.router import default_router
 
         llm_router = default_router()
-    except Exception as e:  # noqa: BLE001 — analyst still works without LLM
+    except Exception as e:
         log.warning("Analyst LLM router unavailable (%s); using rule-based path", e)
     return Analyst(llm_router=llm_router)
 
@@ -200,10 +200,10 @@ def _build_alt_data_fn() -> Any:
     (multiplier=1.0).
     """
     try:
-        from datetime import UTC, datetime, timedelta
+        from datetime import UTC, datetime
 
         from src.agents.alt_data_multiplier import compute_alt_data_multiplier
-    except Exception as e:  # noqa: BLE001 — degrade gracefully
+    except Exception as e:
         log.warning("alt_data_multiplier not constructed (%s)", e)
         return None
 
@@ -211,7 +211,7 @@ def _build_alt_data_fn() -> Any:
     def _insider_fetcher(ticker: str, asof: Any) -> list[Any]:
         try:
             from src.data.sec_insider import fetch_recent_form4
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("sec_insider unavailable: %s", e)
             return []
         try:
@@ -221,7 +221,7 @@ def _build_alt_data_fn() -> Any:
             # the same symbol within the cache TTL.
             txns = list(fetch_recent_form4(tickers=[ticker], days=14))
             return [t for t in txns if getattr(t, "ticker", None) == ticker or True]
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("fetch_recent_form4 failed for %s: %s", ticker, e)
             return []
 
@@ -231,14 +231,14 @@ def _build_alt_data_fn() -> Any:
             return 0.0
         try:
             from src.data.congress import fetch_congress_trades, watchlist_boost
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("congress unavailable: %s", e)
             return 0.0
         try:
             # ``fetch_congress_trades`` takes a list of tickers, not one.
             trades = list(fetch_congress_trades(tickers=[ticker], days=60))
             return float(watchlist_boost(ticker, trades, asof=asof))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("congress fetch failed for %s: %s", ticker, e)
             return 0.0
 
@@ -249,7 +249,7 @@ def _build_alt_data_fn() -> Any:
         try:
             from src.data.news import fetch_finnhub_news
             from src.data.sentiment import score_article
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("news/sentiment unavailable: %s", e)
             return []
         try:
@@ -260,10 +260,10 @@ def _build_alt_data_fn() -> Any:
                     s = score_article(art, today=datetime.now(UTC).date())
                     if s is not None and getattr(s, "score", None) is not None:
                         scores.append(float(s.score))
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     log.debug("score_article failed for %s: %s", art, e)
             return scores
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.debug("news fetch failed for %s: %s", ticker, e)
             return []
 
