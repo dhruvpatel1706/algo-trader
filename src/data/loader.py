@@ -1,10 +1,21 @@
-"""Market-data loader (Alpaca daily bars + parquet cache, yfinance fallback).
+"""Market-data loader.
 
-yfinance is for prototyping only. Sizing / risk decisions in production must use
-broker-grade data. Loud warning when the fallback fires.
+Equity daily bars: tries each provider in order until one returns
+a covering range:
 
-Crypto OHLCV is fetched from public REST endpoints (Binance / Coinbase) using
-stdlib urllib — no auth, no extra deps. Same parquet cache layout.
+  1. Local parquet cache       (fastest, no network)
+  2. Alpaca historical data    (broker-grade, US-friendly, authenticated)
+  3. Polygon Stocks            (premium quality, paid, only if
+                                ``POLYGON_STOCKS_KEY`` is set)
+  4. yfinance                  (free, scraped — prototyping fallback;
+                                emits a warning so the operator notices
+                                when production sizing is using it)
+
+Crypto OHLCV: tries Alpaca crypto → Binance → Coinbase, same chain
+shape, public REST (no auth) for the latter two.
+
+Loud warning when yfinance is the source — it is for prototyping only,
+not for production sizing or risk decisions.
 """
 
 from __future__ import annotations
@@ -39,7 +50,16 @@ def load_daily_bars(
     use_cache: bool = True,
     fallback_to_yfinance: bool = True,
 ) -> dict[str, pd.DataFrame]:
-    """Daily OHLCV per symbol between `start` and `end`. Tries Alpaca, then yfinance."""
+    """Daily OHLCV per symbol between ``start`` and ``end``.
+
+    Provider chain (each leg falls through to the next when its result
+    is empty / errors):
+      cache -> Alpaca -> Polygon (if POLYGON_STOCKS_KEY set) -> yfinance
+
+    The Polygon leg is gated on the env var so operators without a
+    Polygon plan see exactly the legacy two-leg behaviour. yfinance is
+    the loud-warning leg of last resort.
+    """
     out: dict[str, pd.DataFrame] = {}
     for sym in symbols:
         path = _cache_path(sym, "1d")
@@ -52,6 +72,14 @@ def load_daily_bars(
                     continue
 
         df = _fetch_alpaca(sym, start, end)
+        # Polygon Stocks: premium-quality leg, only enabled when the
+        # operator has a paid plan key set. We try it AFTER Alpaca
+        # because Alpaca's data is sufficient for the symbols Alpaca
+        # quotes; Polygon picks up coverage gaps (e.g. delisted tickers
+        # or symbols Alpaca doesn't carry on the paper tier) before we
+        # fall through to free-tier yfinance.
+        if (df is None or df.empty) and _polygon_stocks_enabled():
+            df = _fetch_polygon_stocks(sym, start, end)
         if (df is None or df.empty) and fallback_to_yfinance:
             warnings.warn(
                 f"Falling back to yfinance for {sym}. Not for production sizing.",
@@ -114,6 +142,104 @@ def _fetch_yfinance(symbol: str, start: date, end: date) -> pd.DataFrame | None:
     df = df[["open", "high", "low", "close", "volume"]]
     df.index = pd.to_datetime(df.index, utc=True)
     return df
+
+
+# ---------------------------------------------------------------------------
+# Polygon Stocks (premium daily aggregates)
+# ---------------------------------------------------------------------------
+
+# Stocks daily aggregates endpoint:
+#   https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{from}/{to}
+# Returns up to 50_000 results per call. For any reasonable backtest
+# window on daily bars, a single call covers it. Adjusted=true applies
+# split + dividend factors so historical bars are comparable to today.
+_POLYGON_STOCKS_URL_TEMPLATE = (
+    "https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{from_}/{to}"
+    "?adjusted=true&sort=asc&limit=50000&apiKey={key}"
+)
+
+
+def _polygon_stocks_enabled() -> bool:
+    """True iff a Polygon Stocks API key is configured.
+
+    Cheap env-var check used as a guard before we try the polygon leg.
+    Avoids polluting logs with "polygon key not set" warnings on every
+    call when the operator is intentionally running without polygon.
+    """
+    import os
+
+    return bool(os.environ.get("POLYGON_STOCKS_KEY"))
+
+
+def _fetch_polygon_stocks(
+    symbol: str, start: date, end: date
+) -> pd.DataFrame | None:
+    """Fetch daily OHLCV from Polygon Stocks. Returns None on any failure.
+
+    The shape of the returned DataFrame matches the other equity
+    fetchers exactly: tz-aware UTC index, lowercase
+    ``open/high/low/close/volume`` columns. This makes the legs
+    interchangeable in :func:`load_daily_bars`.
+
+    Failure modes that return ``None`` (no exception bubbled up):
+      - ``POLYGON_STOCKS_KEY`` missing or empty
+      - URL safety guard rejection (defence against future config drift)
+      - Network / HTTP / JSON / shape errors
+      - Empty or malformed ``results`` payload
+
+    The returned frame may have fewer days than requested when a market
+    holiday or symbol delisting truncates coverage. The caller is
+    responsible for re-checking with ``_covers_requested_range``.
+    """
+    import os
+
+    key = os.environ.get("POLYGON_STOCKS_KEY")
+    if not key:
+        return None
+
+    url = _POLYGON_STOCKS_URL_TEMPLATE.format(
+        symbol=urllib.parse.quote(symbol),
+        from_=start.isoformat(),
+        to=end.isoformat(),
+        key=urllib.parse.quote(key, safe=""),
+    )
+    try:
+        with safe_urlopen(url, timeout=_HTTP_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (UnsafeUrlError, urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return None
+    except (ValueError, OSError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    results = payload.get("results")
+    if not isinstance(results, list) or not results:
+        return None
+
+    # Polygon returns one dict per bar with epoch-ms ``t`` + ``o/h/l/c/v``.
+    rows: list[dict] = []
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        try:
+            ts = pd.Timestamp(int(r["t"]), unit="ms", tz="UTC")
+            rows.append(
+                {
+                    "ts": ts,
+                    "open": float(r["o"]),
+                    "high": float(r["h"]),
+                    "low": float(r["l"]),
+                    "close": float(r["c"]),
+                    "volume": float(r.get("v", 0)),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not rows:
+        return None
+    df = pd.DataFrame(rows).set_index("ts").sort_index()
+    return df[["open", "high", "low", "close", "volume"]]
 
 
 # ---------------------------------------------------------------------------
