@@ -91,14 +91,24 @@ def test_register_adds_job_to_scheduler() -> None:
 
 def test_default_jobs_registers_expected_count(tmp_path) -> None:
     """add_default_jobs should register one job per asset agent
-    plus the operational jobs (data_refresh, position_reconcile, eod_summary,
-    nightly_backtest, weekly_walkforward, monthly_retrain, coherence_check,
-    heartbeat) - 13 total when all agents present."""
+    plus the operational jobs. v2 set:
+
+    Per-agent eval jobs (one each):
+      equity, gold, silver, bonds, crypto, governance
+
+    Operational jobs:
+      data_refresh, position_reconcile, eod_summary, nightly_backtest,
+      weekly_walkforward, monthly_retrain, coherence_check,
+      funding_history_refresh, heartbeat
+
+    => 15 total when all agents present.
+    """
     fake = _FakeScheduler()
     runner = Runner(scheduler=fake)
     agents = {
         "equity": _make_agent_stub("equity"),
         "gold": _make_agent_stub("gold"),
+        "silver": _make_agent_stub("silver"),
         "bonds": _make_agent_stub("bonds"),
         "crypto": _make_agent_stub("crypto"),
         "governance": _make_agent_stub("governance"),
@@ -110,6 +120,7 @@ def test_default_jobs_registers_expected_count(tmp_path) -> None:
     expected = {
         "equity_agent.eval",
         "gold_agent.eval",
+        "silver_agent.eval",
         "bonds_agent.eval",
         "crypto_agent.eval",
         "governance_agent.eval",
@@ -120,6 +131,7 @@ def test_default_jobs_registers_expected_count(tmp_path) -> None:
         "weekly_walkforward",
         "monthly_retrain",
         "coherence_check",
+        "funding_history_refresh",
         "heartbeat",
     }
     assert expected.issubset(names)

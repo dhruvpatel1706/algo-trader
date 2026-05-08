@@ -399,6 +399,18 @@ class Runner:
             lambda jw=journal_writer: jw.write({"event": "coherence_check"}),
             IntervalTrigger(hours=1),
         )
+        # Funding-rate history buffer. Runs every 8h to match the
+        # natural funding cadence on Binance/OKX (3 prints per day).
+        # Builds the trailing-90d sample the funding_rate_divergence
+        # strategy needs to compute its percentile thresholds —
+        # without this scheduled job, the strategy is permanently
+        # under-sampled on fresh boots. See scripts/funding_history_buffer.py
+        # for the collection logic.
+        self.register(
+            "funding_history_refresh",
+            _funding_history_job(journal_writer),
+            IntervalTrigger(hours=8),
+        )
         self.register(
             "heartbeat",
             lambda jw=journal_writer: jw.write(
@@ -451,3 +463,53 @@ def _first_sunday_only(fn: Callable[..., Any]) -> Callable[..., Any]:
     _wrapped.__name__ = getattr(fn, "__name__", "wrapped") + "__first_sunday_only"
     _wrapped.__wrapped__ = fn  # type: ignore[attr-defined]
     return _wrapped
+
+
+def _funding_history_job(journal_writer: Any) -> Callable[[], None]:
+    """Build the closure registered as ``funding_history_refresh``.
+
+    Pulls one collection cycle of funding-rate history (delegates to
+    :func:`scripts.funding_history_buffer.collect_once`) and emits a
+    journal entry summarising the row count by symbol so the operator
+    can see the buffer growing on each cycle.
+
+    Failures are caught and logged so a temporary geo-block on every
+    venue (which can happen briefly mid-restart on Linux runners) does
+    NOT take down the scheduler.
+    """
+
+    def _run() -> None:
+        try:
+            from scripts.funding_history_buffer import collect_once  # noqa: PLC0415
+        except Exception:
+            log.exception("funding_history_refresh: import failed")
+            try:
+                journal_writer.write(
+                    {"event": "funding_history_refresh", "ok": False, "reason": "import_failed"}
+                )
+            except Exception:
+                log.exception("funding_history_refresh: journal write failed")
+            return
+
+        try:
+            counts = collect_once()
+            ok = True
+        except Exception:
+            log.exception("funding_history_refresh: collect_once raised")
+            counts = {}
+            ok = False
+        try:
+            journal_writer.write(
+                {
+                    "event": "funding_history_refresh",
+                    "ok": ok,
+                    "rows_added_total": int(sum(counts.values())),
+                    "symbols_with_rows": int(sum(1 for v in counts.values() if v > 0)),
+                    "by_symbol": {k: int(v) for k, v in counts.items()},
+                }
+            )
+        except Exception:
+            log.exception("funding_history_refresh: journal write failed")
+
+    _run.__name__ = "funding_history_refresh_job"
+    return _run
